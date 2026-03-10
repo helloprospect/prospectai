@@ -23,7 +23,7 @@ export default function OptimizerPage() {
     try {
       await api.triggerOptimization(wsId);
       setTimeout(() => { mutate(`optimizer:${wsId}`); setRunning(false); }, 3000);
-    } catch (e) {
+    } catch {
       setRunning(false);
     }
   }
@@ -38,30 +38,53 @@ export default function OptimizerPage() {
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
+      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-white">Optimizer</h1>
-          <p className="text-gray-500 text-sm mt-1">Self-improving prompt & scoring engine · runs nightly</p>
+          <h1 className="text-xl font-semibold text-[#fafafa]">Optimizer</h1>
+          <p className="text-sm text-[#71717a] mt-1">Self-improving prompt & scoring engine · runs nightly</p>
         </div>
         <button
+          type="button"
           onClick={handleTrigger}
           disabled={running || !wsId}
-          className="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-50 rounded-lg text-sm font-medium text-white transition-all duration-150"
         >
-          {running ? "Running…" : "Run Now"}
+          {running ? (
+            <>
+              <svg className="animate-spin" width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.5" strokeDasharray="20 10" />
+              </svg>
+              Running…
+            </>
+          ) : (
+            <>
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <path d="M6.5 1.5L8.5 5.5H11.5L9 8L10 11.5L6.5 9.5L3 11.5L4 8L1.5 5.5H4.5L6.5 1.5Z" fill="currentColor" />
+              </svg>
+              Run Now
+            </>
+          )}
         </button>
       </div>
 
-      {isLoading && <p className="text-gray-500">Loading...</p>}
+      {isLoading && (
+        <div className="flex items-center gap-2 text-sm text-[#52525b]">
+          <svg className="animate-spin" width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" strokeDasharray="20 10" />
+          </svg>
+          Loading…
+        </div>
+      )}
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         {runs?.map((run) => (
           <RunCard key={run.id} run={run} onApprove={handleApprove} approving={approving} />
         ))}
-        {runs?.length === 0 && (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center">
-            <p className="text-gray-500">No optimization runs yet.</p>
-            <p className="text-gray-600 text-sm mt-1">First run requires 30+ sent emails.</p>
+        {runs?.length === 0 && !isLoading && (
+          <div className="bg-[#111113] border border-[#27272a] rounded-xl p-10 text-center">
+            <p className="text-[#52525b]">No optimization runs yet.</p>
+            <p className="text-xs text-[#3f3f46] mt-1">First run requires 30+ sent emails.</p>
           </div>
         )}
       </div>
@@ -69,7 +92,11 @@ export default function OptimizerPage() {
   );
 }
 
-function RunCard({ run, onApprove, approving }: {
+function RunCard({
+  run,
+  onApprove,
+  approving,
+}: {
   run: OptimizationRun;
   onApprove: (id: string) => void;
   approving: string | null;
@@ -80,43 +107,59 @@ function RunCard({ run, onApprove, approving }: {
   const weightChanges = (changes as any).weight_changes;
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+    <div className="bg-[#111113] border border-[#27272a] rounded-xl overflow-hidden">
       <div
-        className="p-5 flex items-start gap-4 cursor-pointer hover:bg-gray-800/50 transition-colors"
+        className="p-5 flex items-start gap-4 cursor-pointer hover:bg-[#18181b] transition-colors duration-150"
         onClick={() => setExpanded(!expanded)}
       >
         <StatusBadge status={run.status} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 mb-1">
-            <span className="text-sm font-medium text-white">
+          <div className="flex items-center gap-3 mb-1.5">
+            <span className="text-sm font-medium text-[#fafafa]">
               {run.period_start} → {run.period_end}
             </span>
-            <span className="text-xs text-gray-500">{run.run_type}</span>
+            <span className="text-xs text-[#52525b] bg-[#18181b] px-2 py-0.5 rounded">
+              {run.run_type}
+            </span>
           </div>
-          <div className="flex items-center gap-4 text-xs text-gray-400">
+          <div className="flex items-center gap-4 text-xs text-[#71717a]">
             <span>{run.emails_analyzed} emails</span>
-            <span>Open {pct(run.avg_open_rate)} vs benchmark {pct(run.benchmark_reply_rate)}</span>
+            <span>Open {pct(run.avg_open_rate)} vs {pct(run.benchmark_reply_rate)} benchmark</span>
             <span>Reply {pct(run.avg_reply_rate)}</span>
-            <span>Confidence {pct(run.confidence)}</span>
+            <span className={run.confidence && run.confidence >= 0.65 ? "text-emerald-400" : "text-yellow-400"}>
+              {pct(run.confidence)} confidence
+            </span>
           </div>
           {(promptChanges.length > 0 || weightChanges) && (
-            <p className="text-xs text-brand-500 mt-1">
+            <p className="text-xs text-brand-400 mt-1.5">
               {promptChanges.length > 0 && `${promptChanges.length} prompt(s) updated`}
               {promptChanges.length > 0 && weightChanges && " · "}
               {weightChanges && "Scoring weights adjusted"}
             </p>
           )}
         </div>
-        <span className="text-gray-600 text-xs">{new Date(run.ran_at).toLocaleString()}</span>
-        <span className="text-gray-600 text-sm">{expanded ? "▲" : "▼"}</span>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <span className="text-xs text-[#52525b]">{new Date(run.ran_at).toLocaleString()}</span>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            className={`text-[#52525b] transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
+          >
+            <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
       </div>
 
       {expanded && (
-        <div className="border-t border-gray-800 p-5 space-y-4">
+        <div className="border-t border-[#27272a] p-5 space-y-5 animate-fade-in">
           {run.claude_reasoning && (
             <div>
-              <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">Claude Analysis</h3>
-              <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">
+              <h3 className="text-[10px] font-medium text-[#52525b] uppercase tracking-widest mb-2">
+                Claude Analysis
+              </h3>
+              <p className="text-sm text-[#a1a1aa] whitespace-pre-wrap leading-relaxed">
                 {run.claude_reasoning}
               </p>
             </div>
@@ -124,12 +167,14 @@ function RunCard({ run, onApprove, approving }: {
 
           {promptChanges.length > 0 && (
             <div>
-              <h3 className="text-xs font-medium text-gray-500 uppercase mb-2">Prompt Changes</h3>
+              <h3 className="text-[10px] font-medium text-[#52525b] uppercase tracking-widest mb-2">
+                Prompt Changes
+              </h3>
               <div className="space-y-2">
                 {promptChanges.map((c: any, i: number) => (
-                  <div key={i} className="bg-gray-800 rounded-lg p-3">
-                    <span className="text-xs text-brand-500 font-medium">{c.template_type}</span>
-                    <p className="text-xs text-gray-400 mt-1">{c.rationale}</p>
+                  <div key={i} className="bg-[#18181b] border border-[#27272a] rounded-lg p-3">
+                    <span className="text-xs text-brand-400 font-medium">{c.template_type}</span>
+                    <p className="text-xs text-[#71717a] mt-1">{c.rationale}</p>
                   </div>
                 ))}
               </div>
@@ -138,9 +183,10 @@ function RunCard({ run, onApprove, approving }: {
 
           {run.status === "needs_review" && (
             <button
+              type="button"
               onClick={() => onApprove(run.id)}
               disabled={approving === run.id}
-              className="px-4 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 rounded-lg text-sm font-medium text-white transition-all duration-150"
             >
               {approving === run.id ? "Applying…" : "Approve & Apply Changes"}
             </button>
@@ -151,22 +197,25 @@ function RunCard({ run, onApprove, approving }: {
   );
 }
 
+const STATUS_STYLES: Record<string, string> = {
+  completed:                  "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+  needs_review:               "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20",
+  paused_anomaly:             "bg-red-500/10 text-red-400 border border-red-500/20",
+  skipped_insufficient_data:  "bg-[#27272a] text-[#71717a]",
+};
+const STATUS_LABELS: Record<string, string> = {
+  completed:                  "Applied",
+  needs_review:               "Review",
+  paused_anomaly:             "Paused",
+  skipped_insufficient_data:  "Skipped",
+};
+
 function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    completed: "bg-green-500/10 text-green-400 border-green-500/20",
-    needs_review: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
-    paused_anomaly: "bg-red-500/10 text-red-400 border-red-500/20",
-    skipped_insufficient_data: "bg-gray-700 text-gray-400 border-gray-600",
-  };
-  const labels: Record<string, string> = {
-    completed: "Applied",
-    needs_review: "Review",
-    paused_anomaly: "Paused",
-    skipped_insufficient_data: "Skipped",
-  };
   return (
-    <span className={`text-xs px-2 py-0.5 rounded border font-medium ${styles[status] || "bg-gray-700 text-gray-400"}`}>
-      {labels[status] || status}
+    <span className={`text-xs px-2 py-0.5 rounded-md font-medium flex-shrink-0 ${
+      STATUS_STYLES[status] || "bg-[#27272a] text-[#71717a]"
+    }`}>
+      {STATUS_LABELS[status] || status}
     </span>
   );
 }
