@@ -7,7 +7,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 // For now, using first workspace. Multi-workspace selector can be added later.
 const WORKSPACE_ID = process.env.NEXT_PUBLIC_WORKSPACE_ID || "";
 
-const fetcher = (key: string) => {
+const fetcher = (key: string): Promise<any> => {
   if (key.startsWith("stats:")) return api.getWorkspaceStats(key.slice(6));
   if (key.startsWith("perf:")) return api.getPerformanceSummary(key.slice(5), 7);
   if (key.startsWith("pipeline:")) return api.getPipelineCounts(key.slice(9));
