@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: prospectai
+      POSTGRES_USER: prospectai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./database/seed_data/seed_prompts.sql:/docker-entrypoint-initdb.d/02_seed_prompts.sql
+      - ./database/seed_data/benchmarks.sql:/docker-entrypoint-initdb.d/03_benchmarks.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prospectai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://prospectai:${POSTGRES_PASSWORD:-devpassword}@db:5432/prospectai
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      SEARCHLEADS_API_KEY: ${SEARCHLEADS_API_KEY}
+      INSTANTLY_API_KEY: ${INSTANTLY_API_KEY}
+      APIFY_API_KEY: ${APIFY_API_KEY}
+      REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID}
+      REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET}
+      REDDIT_USER_AGENT: ${REDDIT_USER_AGENT}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-prod}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  pgdata:
