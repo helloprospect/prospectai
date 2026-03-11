@@ -109,16 +109,16 @@ async def score_lead(
 
 
 async def personalize_email(
-    body_a_template: str,
-    body_b_template: str,
-    subject_a_template: str,
-    subject_b_template: str,
+    body_template: str,
+    subject_template: str,
     lead: dict,
     research: dict,
     score: dict,
     workspace: dict,
 ) -> tuple[dict, int]:
-    """Generate all 4 email variants in one API call to save cost."""
+    """Generate one personalized email using the pre-selected body + subject templates.
+    Returns {"body_text": "...", "subject_text": "..."}, tokens.
+    """
     research_summary = _research_summary(research)
     context = {
         "first_name": lead.get("first_name", ""),
@@ -133,33 +133,105 @@ async def personalize_email(
         "value_prop": workspace.get("business_profile", {}).get("value_prop", ""),
     }
 
-    combined_prompt = f"""Generate all 4 email variants for this lead. Return as JSON with keys: body_a, body_b, subject_a, subject_b.
+    prompt = f"""Write one cold email for this lead. Return JSON with keys: body_text, subject_text.
 
-=== BODY A INSTRUCTIONS ===
-{_fill_template(body_a_template, context)}
+=== BODY INSTRUCTIONS ===
+{_fill_template(body_template, context)}
 
-=== BODY B INSTRUCTIONS ===
-{_fill_template(body_b_template, context)}
+=== SUBJECT LINE INSTRUCTIONS ===
+{_fill_template(subject_template, context)}
 
-=== SUBJECT A INSTRUCTIONS ===
-{_fill_template(subject_a_template, context)}
-
-=== SUBJECT B INSTRUCTIONS ===
-{_fill_template(subject_b_template, context)}
-
-Return ONLY this JSON structure, no other text:
+Return ONLY this JSON structure:
 {{
-  "body_a": "...",
-  "body_b": "...",
-  "subject_a": "...",
-  "subject_b": "..."
+  "body_text": "...",
+  "subject_text": "..."
 }}"""
 
     system = (
         "You write high-converting cold emails. Return valid JSON only. "
-        "Each email must be distinct and follow its specific instructions exactly."
+        "Follow the instructions exactly. Keep emails concise and personal."
     )
-    return await complete_json(system, combined_prompt, max_tokens=2000)
+    return await complete_json(system, prompt, max_tokens=1200)
+
+
+async def generate_explorer_prompt(
+    performance_data: list[dict],
+    current_champion: str,
+    variant_axis: str,
+    workspace: dict,
+) -> tuple[str, int]:
+    """Generate a new Explorer prompt that tests ONE hypothesis.
+
+    variant_axis: 'body' or 'subject'
+    performance_data: list of {template_type, reply_rate, positive_count, negative_count, sent_count,
+                                positive_examples, negative_examples}
+    Returns (new_prompt_text, tokens) — plain prompt text, no JSON wrapper.
+    """
+    profile = workspace.get("business_profile", {})
+    tone = workspace.get("tone_config", {})
+
+    variants_text = ""
+    for v in performance_data:
+        rate = f"{v.get('reply_rate', 0):.1%}"
+        sent = v.get("sent_count", 0)
+        pos = v.get("positive_count", 0)
+        neg = v.get("negative_count", 0)
+        no_reply = sent - pos - neg
+        variants_text += f"\n### {v['template_type']}\nGesendet: {sent} | Positiv: {pos} ({rate}) | Negativ: {neg} | Keine Reaktion: {no_reply}\n"
+
+        if v.get("positive_examples"):
+            variants_text += "Erfolgreiche Beispiele:\n"
+            for ex in v["positive_examples"][:3]:
+                variants_text += f'  - Subject: "{ex.get("subject","")}" | Icebreaker: "{ex.get("icebreaker","")[:120]}"\n'
+
+        if v.get("negative_examples"):
+            variants_text += "Abgelehnte Beispiele:\n"
+            for ex in v["negative_examples"][:2]:
+                variants_text += f'  - Subject: "{ex.get("subject","")}" | Icebreaker: "{ex.get("icebreaker","")[:120]}"\n'
+
+    prompt = f"""Du bist Cold-Email-Experte.
+
+## Kontext
+Produkt: {profile.get("product_description", "")}
+Value Prop: {profile.get("value_prop", "")}
+Ton: {tone.get("style", "professional")}
+
+## Performance-Daten ({variant_axis.upper()} VARIANTEN)
+{variants_text}
+
+## Aktueller Champion-Prompt
+{current_champion}
+
+## Aufgabe
+1. Analysiere WARUM der Champion funktioniert (Ton, Einstieg, Referenz, Länge, CTA).
+2. Erkläre WARUM andere versagen.
+3. Generiere einen neuen Explorer-Prompt der NUR EINEN Aspekt ändert und eine konkrete Hypothese testet.
+
+Der Explorer-Prompt muss:
+- Ein vollständiger Prompt-Text sein (direkt verwendbar wie der Champion-Prompt oben)
+- Dieselben Template-Variablen nutzen: {{{{first_name}}}}, {{{{company}}}}, {{{{title}}}}, {{{{research_summary}}}}, {{{{value_prop}}}}
+- GENAU EINE Sache anders machen als der Champion (z.B. nur den CTA, oder nur den Einstieg)
+
+Antworte in diesem Format:
+ANALYSE: [2-3 Sätze warum Champion funktioniert]
+HYPOTHESE: [Was der Explorer testet]
+PROMPT:
+[Vollständiger neuer Explorer-Prompt-Text]"""
+
+    system = (
+        "You are a cold email optimization expert. Analyze data and write one new exploration prompt. "
+        "Output format: ANALYSE: ... HYPOTHESE: ... PROMPT: [full prompt text]"
+    )
+    text, tokens = await complete(system, prompt, max_tokens=2000, temperature=0.7)
+
+    # Extract just the PROMPT section
+    if "PROMPT:" in text:
+        new_prompt = text.split("PROMPT:", 1)[1].strip()
+    else:
+        # Fallback: return the full text as the prompt
+        new_prompt = text.strip()
+
+    return new_prompt, tokens
 
 
 async def classify_reddit_post(posts: list[dict]) -> tuple[list[dict], int]:
@@ -265,7 +337,7 @@ Analyze and return a JSON object:
   "analysis": "2-3 paragraph analysis of what's working and what isn't",
   "prompt_changes": [
     {{
-      "template_type": "body_b",
+      "template_type": "body_challenger",
       "new_content": "full rewritten prompt text",
       "rationale": "why this change"
     }}

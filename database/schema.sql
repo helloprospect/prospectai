@@ -61,7 +61,9 @@ CREATE TABLE seed_prompts (
     industry            TEXT NOT NULL,
     -- 'saas', 'ecommerce', 'agency', 'professional_services', etc.
     template_type       TEXT NOT NULL,
-    -- 'research', 'scoring', 'body_a', 'body_b', 'subject_a', 'subject_b'
+    -- 'research' | 'scoring'
+    -- | 'body_champion' | 'body_challenger' | 'body_explorer'
+    -- | 'subject_champion' | 'subject_challenger' | 'subject_explorer'
     content             TEXT NOT NULL,
     avg_reply_rate      FLOAT,
     avg_open_rate       FLOAT,
@@ -88,7 +90,9 @@ CREATE TABLE prompt_templates (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id        UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     template_type       TEXT NOT NULL,
-    -- 'research' | 'scoring' | 'body_a' | 'body_b' | 'subject_a' | 'subject_b'
+    -- 'research' | 'scoring'
+    -- | 'body_champion' | 'body_challenger' | 'body_explorer'
+    -- | 'subject_champion' | 'subject_challenger' | 'subject_explorer'
     version             INTEGER NOT NULL DEFAULT 1,
     content             TEXT NOT NULL,
     is_active           BOOLEAN NOT NULL DEFAULT FALSE,
@@ -201,17 +205,20 @@ CREATE TABLE lead_scores (
 -- ============================================================
 
 CREATE TABLE email_variants (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id        UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    lead_id             UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
-    body_a              TEXT,
-    body_b              TEXT,
-    subject_a           TEXT,
-    subject_b           TEXT,
-    prompt_template_ids JSONB,
-    -- {"body_a": "uuid", "body_b": "uuid", "subject_a": "uuid", "subject_b": "uuid"}
-    tokens_used         INTEGER,
-    generated_at        TIMESTAMPTZ DEFAULT NOW()
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id          UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    lead_id               UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    -- One personalized email per lead (pre-selected by weighted CCC draw)
+    body_text             TEXT,
+    subject_text          TEXT,
+    body_template_type    TEXT,
+    -- 'body_champion' | 'body_challenger' | 'body_explorer'
+    subject_template_type TEXT,
+    -- 'subject_champion' | 'subject_challenger' | 'subject_explorer'
+    body_template_id      UUID REFERENCES prompt_templates(id),
+    subject_template_id   UUID REFERENCES prompt_templates(id),
+    tokens_used           INTEGER,
+    generated_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE email_sends (
@@ -221,8 +228,8 @@ CREATE TABLE email_sends (
     variant_id              UUID REFERENCES email_variants(id),
     instantly_lead_id       TEXT,
     campaign_id             TEXT,
-    body_variant            TEXT,   -- 'A' | 'B'
-    subject_variant         TEXT,   -- 'A' | 'B'
+    body_variant            TEXT,   -- 'body_champion' | 'body_challenger' | 'body_explorer'
+    subject_variant         TEXT,   -- 'subject_champion' | 'subject_challenger' | 'subject_explorer'
     sent_at                 TIMESTAMPTZ,
     status                  TEXT DEFAULT 'queued'
     -- queued | sent | bounced | error
@@ -238,8 +245,10 @@ CREATE TABLE email_performance (
     first_opened_at     TIMESTAMPTZ,
     replied             BOOLEAN DEFAULT FALSE,
     replied_at          TIMESTAMPTZ,
+    instantly_interest_status INTEGER DEFAULT 0,
+    -- Instantly: 1/2/3 = positive, -1/-2/-3 = negative, 0 = no reply
     reply_sentiment     TEXT,
-    -- 'positive' | 'negative' | 'neutral' | 'ooo' | 'not_interested'
+    -- 'positive' | 'negative' | 'neutral' | 'ooo'
     reply_text          TEXT,
     bounced             BOOLEAN DEFAULT FALSE,
     unsubscribed        BOOLEAN DEFAULT FALSE,
@@ -316,6 +325,8 @@ CREATE TABLE reddit_actions (
 CREATE INDEX idx_leads_workspace_status ON leads(workspace_id, status);
 CREATE INDEX idx_leads_workspace_source ON leads(workspace_id, source);
 CREATE INDEX idx_leads_workspace_created ON leads(workspace_id, created_at DESC);
+CREATE INDEX idx_email_variants_lead ON email_variants(lead_id);
+CREATE INDEX idx_email_variants_body_type ON email_variants(workspace_id, body_template_type);
 CREATE INDEX idx_lead_research_lead ON lead_research(lead_id);
 CREATE INDEX idx_lead_scores_lead ON lead_scores(lead_id);
 CREATE INDEX idx_email_sends_workspace ON email_sends(workspace_id, sent_at DESC);

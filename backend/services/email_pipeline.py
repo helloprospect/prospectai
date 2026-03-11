@@ -275,6 +275,11 @@ async def _score_one_lead(
 # STAGE 4: PERSONALIZATION
 # ============================================================
 
+# Champion/Challenger/Explorer weights — optimizer may promote/demote but weights stay fixed
+BODY_WEIGHTS = {"body_champion": 0.60, "body_challenger": 0.25, "body_explorer": 0.15}
+SUBJECT_WEIGHTS = {"subject_champion": 0.60, "subject_challenger": 0.25, "subject_explorer": 0.15}
+
+
 async def personalize_leads(workspace_id: UUID, batch_size: int = 50, concurrency: int = 5) -> int:
     async with db.get_conn() as conn:
         leads = await conn.fetch(
@@ -290,16 +295,19 @@ async def personalize_leads(workspace_id: UUID, batch_size: int = 50, concurrenc
             """,
             workspace_id, batch_size,
         )
-        templates = {
-            t["template_type"]: t["content"]
-            for t in await conn.fetch(
-                "SELECT template_type, content FROM prompt_templates WHERE workspace_id = $1 AND is_active = true",
-                workspace_id,
-            )
-        }
+        # Load all active email templates keyed by template_type
+        template_rows = await conn.fetch(
+            "SELECT id, template_type, content FROM prompt_templates WHERE workspace_id = $1 AND is_active = true",
+            workspace_id,
+        )
+        templates = {r["template_type"]: {"id": r["id"], "content": r["content"]} for r in template_rows}
         workspace = await conn.fetchrow("SELECT * FROM workspaces WHERE id = $1", workspace_id)
 
-    if not leads or not all(k in templates for k in ["body_a", "body_b", "subject_a", "subject_b"]):
+    # Need at least champion variants to run
+    has_body = any(k in templates for k in BODY_WEIGHTS)
+    has_subject = any(k in templates for k in SUBJECT_WEIGHTS)
+    if not leads or not has_body or not has_subject:
+        logger.warning(f"[personalization] Missing templates for workspace {workspace_id}. Have: {list(templates.keys())}")
         return 0
 
     ws_dict = dict(workspace)
@@ -310,6 +318,17 @@ async def personalize_leads(workspace_id: UUID, batch_size: int = 50, concurrenc
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     return sum(1 for r in results if r is True)
+
+
+def _pick_variant(weights_dict: dict, available_templates: dict) -> str:
+    """Weighted-random pick from available templates. Falls back to any available."""
+    available = {k: v for k, v in weights_dict.items() if k in available_templates}
+    if not available:
+        # Fall back to any template in available_templates matching the axis
+        return next(iter(available_templates))
+    keys = list(available.keys())
+    weights = [weights_dict[k] for k in keys]
+    return random.choices(keys, weights=weights)[0]
 
 
 async def _personalize_one_lead(workspace_id, lead, templates, workspace, sem) -> bool:
@@ -323,9 +342,15 @@ async def _personalize_one_lead(workspace_id, lead, templates, workspace, sem) -
             }
             score_data = lead.get("score_breakdown") or {}
 
-            variants, tokens = await claude_client.personalize_email(
-                templates["body_a"], templates["body_b"],
-                templates["subject_a"], templates["subject_b"],
+            # Weighted-random selection of body and subject variant
+            body_type = _pick_variant(BODY_WEIGHTS, {k: v for k, v in templates.items() if k.startswith("body_")})
+            subject_type = _pick_variant(SUBJECT_WEIGHTS, {k: v for k, v in templates.items() if k.startswith("subject_")})
+
+            body_template = templates[body_type]
+            subject_template = templates[subject_type]
+
+            result, tokens = await claude_client.personalize_email(
+                body_template["content"], subject_template["content"],
                 lead, research, score_data, workspace,
             )
 
@@ -333,14 +358,18 @@ async def _personalize_one_lead(workspace_id, lead, templates, workspace, sem) -
                 await conn.execute(
                     """
                     INSERT INTO email_variants
-                        (workspace_id, lead_id, body_a, body_b, subject_a, subject_b, tokens_used)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                        (workspace_id, lead_id, body_text, subject_text,
+                         body_template_type, subject_template_type,
+                         body_template_id, subject_template_id, tokens_used)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
                     """,
                     workspace_id, lead["id"],
-                    variants.get("body_a", ""),
-                    variants.get("body_b", ""),
-                    variants.get("subject_a", ""),
-                    variants.get("subject_b", ""),
+                    result.get("body_text", ""),
+                    result.get("subject_text", ""),
+                    body_type,
+                    subject_type,
+                    body_template["id"],
+                    subject_template["id"],
                     tokens,
                 )
                 await conn.execute(
@@ -368,7 +397,8 @@ async def send_leads(workspace_id: UUID, batch_size: int = 100) -> int:
         leads = await conn.fetch(
             """
             SELECT l.id, l.email, l.first_name, l.last_name, l.company,
-                   ev.id as variant_id, ev.body_a, ev.body_b, ev.subject_a, ev.subject_b
+                   ev.id as variant_id, ev.body_text, ev.subject_text,
+                   ev.body_template_type, ev.subject_template_type
             FROM leads l
             JOIN email_variants ev ON ev.lead_id = l.id
             WHERE l.workspace_id = $1 AND l.status = 'personalized'
@@ -386,12 +416,6 @@ async def send_leads(workspace_id: UUID, batch_size: int = 100) -> int:
     sent = 0
 
     for lead in leads:
-        # Random A/B assignment for equal distribution
-        body_variant = random.choice(["A", "B"])
-        subject_variant = random.choice(["A", "B"])
-        selected_body = lead["body_a"] if body_variant == "A" else lead["body_b"]
-        selected_subject = lead["subject_a"] if subject_variant == "A" else lead["subject_b"]
-
         try:
             result = await client.add_lead(
                 campaign_id=campaign_id,
@@ -400,8 +424,8 @@ async def send_leads(workspace_id: UUID, batch_size: int = 100) -> int:
                 last_name=lead["last_name"] or "",
                 company=lead["company"] or "",
                 custom_variables={
-                    "email_body": selected_body,
-                    "email_subject": selected_subject,
+                    "email_body": lead["body_text"] or "",
+                    "email_subject": lead["subject_text"] or "",
                 },
             )
             instantly_lead_id = result.get("id") or result.get("lead_id")
@@ -416,7 +440,8 @@ async def send_leads(workspace_id: UUID, batch_size: int = 100) -> int:
                     """,
                     workspace_id, lead["id"], lead["variant_id"],
                     instantly_lead_id, campaign_id,
-                    body_variant, subject_variant,
+                    lead["body_template_type"],
+                    lead["subject_template_type"],
                 )
                 await conn.execute(
                     "UPDATE leads SET status = 'sent' WHERE id = $1", lead["id"]

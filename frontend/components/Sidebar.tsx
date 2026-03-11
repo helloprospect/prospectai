@@ -36,6 +36,15 @@ const NAV = [
     ),
   },
   {
+    href: "/variants",
+    label: "A/B Testing",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M2 12V7M6 12V4M10 12V6M14 12V9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     href: "/optimizer",
     label: "Optimizer",
     icon: (

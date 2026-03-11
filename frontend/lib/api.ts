@@ -49,6 +49,8 @@ export const api = {
     request(`/optimizer/${workspaceId}/runs/${runId}/approve`, { method: "POST" }),
   getPrompts: (workspaceId: string) =>
     request<PromptTemplate[]>(`/optimizer/${workspaceId}/prompts`),
+  getVariantStatus: (workspaceId: string) =>
+    request<VariantStatus>(`/optimizer/${workspaceId}/variants`),
 
   // Reddit
   getRedditStats: (workspaceId: string) =>
@@ -141,6 +143,32 @@ export interface PromptTemplate {
   created_by: string;
   content_preview: string;
   created_at: string;
+}
+
+export interface VariantInfo {
+  type: string;
+  weight: number;
+  version: number | null;
+  created_by: string | null;
+  content_preview: string | null;
+  sent: number;
+  positive: number;
+  negative: number;
+  no_reply: number;
+  positive_rate: number;
+  confidence: "high" | "medium" | "low";
+  samples_needed: number;
+}
+
+export interface VariantStatus {
+  body: { champion: VariantInfo; challenger: VariantInfo; explorer: VariantInfo };
+  subject: { champion: VariantInfo; challenger: VariantInfo; explorer: VariantInfo };
+  last_optimization: {
+    ran_at: string;
+    status: string;
+    claude_reasoning: string;
+    changes_made: Record<string, unknown>;
+  } | null;
 }
 
 export interface RedditStats {

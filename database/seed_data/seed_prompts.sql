@@ -1,7 +1,11 @@
--- Seed Prompts
--- These are the global starting templates seeded from real campaign data.
--- Add your best-performing prompts here per industry.
--- The optimizer will create workspace-specific variants that evolve from these.
+-- Seed Prompts — Champion / Challenger / Explorer framework
+-- template_type: 'research' | 'scoring'
+--   | 'body_champion' | 'body_challenger' | 'body_explorer'
+--   | 'subject_champion' | 'subject_challenger' | 'subject_explorer'
+--
+-- Champion (60% traffic): best-performing, keeps running
+-- Challenger (25%): second-best, keeps pressure on champion
+-- Explorer (15%): tests ONE new hypothesis — replaced by optimizer when it hits 50 samples
 
 -- ============================================================
 -- RESEARCH PROMPTS
@@ -104,13 +108,13 @@ Be strict. Score 70+ only for leads with clear buying signals AND strong ICP fit
 );
 
 -- ============================================================
--- EMAIL BODY PROMPTS
+-- EMAIL BODY PROMPTS — Champion / Challenger / Explorer
 -- ============================================================
 
 INSERT INTO seed_prompts (industry, template_type, content, avg_reply_rate, sample_size, notes)
 VALUES (
     'general',
-    'body_a',
+    'body_champion',
     $PROMPT$You are writing a cold email for a cold email agency. Write a short, direct email — NO fluff, NO fake personalization.
 
 SENDER:
@@ -128,13 +132,14 @@ Research: {{research_summary}}
 STYLE: Direct, confident, peer-to-peer. Write like a consultant talking to a peer, not a salesperson.
 LENGTH: 4-6 sentences max. No bullet points in the main body.
 FORMAT: Plain text only.
+CTA: Soft close — "Worth a quick chat?" or similar low-commitment ask.
 
 Write ONLY the email body (no subject line, no sign-off). Start with a specific observation about them or their company — not a compliment.$PROMPT$,
-    NULL, 0, 'Direct style body template'
+    NULL, 0, 'Champion: direct style, specific observation opener, soft CTA'
 ),
 (
     'general',
-    'body_b',
+    'body_challenger',
     $PROMPT$Write a cold email that opens with a question. Short, curiosity-driven, not salesy.
 
 SENDER:
@@ -149,22 +154,49 @@ Company: {{company}}
 Primary Angle: {{primary_angle}}
 Research: {{research_summary}}
 
-STYLE: Opens with a relevant question about a specific challenge or situation. Conversational.
+STYLE: Opens with a relevant question about a specific challenge or situation at their company. Conversational.
 LENGTH: 3-5 sentences. Very short.
 FORMAT: Plain text.
+CTA: Ask if it's relevant to them — "Is this something you're dealing with at {{company}}?"
 
-Write ONLY the email body. The question should be about THEIR business, not about whether they want to buy something.$PROMPT$,
-    NULL, 0, 'Question-opener body template'
+Write ONLY the email body. The opening question should be about THEIR business, not about whether they want to buy something.$PROMPT$,
+    NULL, 0, 'Challenger: question opener, curiosity-driven, relevance CTA'
+),
+(
+    'general',
+    'body_explorer',
+    $PROMPT$Write a cold email that leads with a specific result or number, then connects to their situation.
+
+SENDER:
+Company: {{sender_company}}
+Product/Service: {{product_description}}
+Value Prop: {{value_prop}}
+
+RECIPIENT:
+Name: {{first_name}} {{last_name}}
+Title: {{title}}
+Company: {{company}}
+Primary Angle: {{primary_angle}}
+Research: {{research_summary}}
+
+STYLE: Opens with a concrete result or benchmark (e.g., "We helped [similar company type] get X result in Y timeframe"). Then connect to why this is relevant to {{company}} based on the research.
+LENGTH: 4-5 sentences.
+FORMAT: Plain text.
+CTA: Direct ask — "Would it make sense to show you how?" or "Open to a 15-min call?"
+
+Hypothesis being tested: Does leading with proof/results outperform opening with observation or question?
+Write ONLY the email body.$PROMPT$,
+    NULL, 0, 'Explorer: result/proof opener — tests social proof hypothesis'
 );
 
 -- ============================================================
--- SUBJECT LINE PROMPTS
+-- SUBJECT LINE PROMPTS — Champion / Challenger / Explorer
 -- ============================================================
 
 INSERT INTO seed_prompts (industry, template_type, content, avg_reply_rate, sample_size, notes)
 VALUES (
     'general',
-    'subject_a',
+    'subject_champion',
     $PROMPT$Generate 1 cold email subject line. Specific and relevant to this person/company. No clickbait.
 
 Recipient: {{first_name}} {{last_name}}, {{title}} at {{company}}
@@ -179,11 +211,11 @@ Rules:
 - Should feel like it came from a peer, not a mass email
 
 Return ONLY the subject line text, nothing else.$PROMPT$,
-    NULL, 0, 'Statement-style subject line'
+    NULL, 0, 'Champion subject: statement style, specific, no question mark'
 ),
 (
     'general',
-    'subject_b',
+    'subject_challenger',
     $PROMPT$Generate 1 cold email subject line as a short question.
 
 Recipient: {{first_name}} {{last_name}}, {{title}} at {{company}}
@@ -193,9 +225,31 @@ Industry: {{industry}}
 Rules:
 - 5-8 words
 - Ends with a question mark
-- Must be about their business, not about our service
-- Should spark genuine curiosity, not feel like a sales trap
+- Must be about their business challenge or situation, not about our service
+- Should spark genuine curiosity without feeling like a sales trap
+- Example format: "How is {{company}} handling [relevant challenge]?"
 
 Return ONLY the subject line, nothing else.$PROMPT$,
-    NULL, 0, 'Question-style subject line'
+    NULL, 0, 'Challenger subject: question style, curiosity-driven'
+),
+(
+    'general',
+    'subject_explorer',
+    $PROMPT$Generate 1 cold email subject line that references a specific result or comparison.
+
+Recipient: {{first_name}} {{last_name}}, {{title}} at {{company}}
+Email angle: {{primary_angle}}
+Industry: {{industry}}
+
+Rules:
+- 5-9 words
+- References a specific outcome, number, or company type (not theirs directly)
+- No generic phrases like "improve your results" or "scale your business"
+- Should make them think "that's specific, what is this about?"
+- Example formats: "From X to Y in 90 days", "What [similar company type] changed"
+
+Hypothesis: Does a result-referencing subject line outperform statement or question styles?
+
+Return ONLY the subject line, nothing else.$PROMPT$,
+    NULL, 0, 'Explorer subject: result/proof reference — tests social proof hypothesis'
 );
