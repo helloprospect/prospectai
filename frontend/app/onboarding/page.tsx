@@ -20,11 +20,22 @@ const INDUSTRIES = [
 
 const SIZES = ["1–10", "10–50", "50–200", "200–500", "500–1000", "1000+"];
 
-export default function OnboardingPage() {
-  const router = useRouter();
-  const [step, setStep] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [data, setData] = useState({
+function canAdvance(step: number, data: ReturnType<typeof defaultData>): string | null {
+  if (step === 0) {
+    if (!data.name.trim()) return "Workspace name is required";
+    if (!data.owner_email.trim() || !data.owner_email.includes("@")) return "Valid email is required";
+    if (!data.business_profile.product_description.trim()) return "Describe what you sell";
+    if (!data.business_profile.value_prop.trim()) return "Value prop is required";
+  }
+  if (step === 1) {
+    if (data.icp_config.industries.length === 0) return "Select at least one industry";
+    if (data.icp_config.titles.filter(Boolean).length === 0) return "Add at least one target title";
+  }
+  return null;
+}
+
+function defaultData() {
+  return {
     name: "",
     owner_email: "",
     business_profile: {
@@ -45,7 +56,15 @@ export default function OnboardingPage() {
     instantly_api_key: "",
     instantly_campaign_id: "",
     daily_lead_target: 50,
-  });
+  };
+}
+
+export default function OnboardingPage() {
+  const router = useRouter();
+  const [step, setStep] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState(defaultData);
 
   function update(path: string, value: unknown) {
     const keys = path.split(".");
@@ -140,10 +159,16 @@ export default function OnboardingPage() {
           {step === 3 && <StepSending data={data} update={update} />}
           {step === 4 && <StepLaunch data={data} />}
 
+          {error && (
+            <div className="mt-5 px-3.5 py-2.5 bg-red-500/10 border border-red-500/20 rounded-lg">
+              <p className="text-xs text-red-400">{error}</p>
+            </div>
+          )}
+
           <div className="flex justify-between items-center mt-8 pt-6 border-t border-[#27272a]">
             <button
               type="button"
-              onClick={() => setStep(Math.max(0, step - 1))}
+              onClick={() => { setError(null); setStep(Math.max(0, step - 1)); }}
               disabled={step === 0}
               className="flex items-center gap-1.5 px-4 py-2 text-sm text-[#71717a] hover:text-[#a1a1aa] disabled:opacity-0 transition-colors"
             >
@@ -155,7 +180,12 @@ export default function OnboardingPage() {
             {step < 4 ? (
               <button
                 type="button"
-                onClick={() => setStep(step + 1)}
+                onClick={() => {
+                  const err = canAdvance(step, data);
+                  if (err) { setError(err); return; }
+                  setError(null);
+                  setStep(step + 1);
+                }}
                 className="flex items-center gap-1.5 px-5 py-2.5 bg-brand-500 hover:bg-brand-600 rounded-lg text-sm font-medium text-white transition-all duration-150 shadow-glow"
               >
                 Continue

@@ -50,6 +50,17 @@ export const api = {
   getPrompts: (workspaceId: string) =>
     request<PromptTemplate[]>(`/optimizer/${workspaceId}/prompts`),
 
+  // Prompts (full content + edit)
+  getPromptFull: (workspaceId: string, promptId: string) =>
+    request<PromptTemplate & { content: string }>(`/optimizer/${workspaceId}/prompts/${promptId}`),
+  updatePrompt: (workspaceId: string, promptId: string, content: string) =>
+    request<PromptTemplate>(`/optimizer/${workspaceId}/prompts/${promptId}`, {
+      method: "PUT",
+      body: JSON.stringify({ content }),
+    }),
+  getWeights: (workspaceId: string) =>
+    request<ScoringWeights[]>(`/optimizer/${workspaceId}/weights`),
+
   // Reddit
   getRedditStats: (workspaceId: string) =>
     request<RedditStats>(`/reddit/${workspaceId}/stats`),
@@ -140,6 +151,16 @@ export interface PromptTemplate {
   performance_score: number | null;
   created_by: string;
   content_preview: string;
+  created_at: string;
+}
+
+export interface ScoringWeights {
+  id: string;
+  version: number;
+  is_active: boolean;
+  weights: Record<string, number>;
+  min_score_threshold: number;
+  rationale: string | null;
   created_at: string;
 }
 
