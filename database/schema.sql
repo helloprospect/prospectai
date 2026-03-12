@@ -246,6 +246,7 @@ CREATE TABLE email_performance (
     bounced             BOOLEAN DEFAULT FALSE,
     unsubscribed        BOOLEAN DEFAULT FALSE,
     converted           BOOLEAN DEFAULT FALSE,
+    interest_status     INTEGER DEFAULT 0,
     synced_at           TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(send_id)
 );

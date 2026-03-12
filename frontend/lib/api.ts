@@ -20,7 +20,6 @@ export const api = {
     request<Workspace>("/workspaces", { method: "POST", body: JSON.stringify(data) }),
   updateWorkspace: (id: string, data: Partial<Workspace>) =>
     request<Workspace>(`/workspaces/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  getWorkspaceStats: (id: string) => request<WorkspaceStats>(`/workspaces/${id}/stats`),
 
   // Campaigns
   runPipeline: (workspaceId: string) =>
@@ -45,27 +44,8 @@ export const api = {
     request<OptimizationRun[]>(`/optimizer/${workspaceId}/runs`),
   triggerOptimization: (workspaceId: string) =>
     request(`/optimizer/${workspaceId}/run`, { method: "POST" }),
-  approveOptimization: (workspaceId: string, runId: string) =>
-    request(`/optimizer/${workspaceId}/runs/${runId}/approve`, { method: "POST" }),
   getPrompts: (workspaceId: string) =>
     request<PromptTemplate[]>(`/optimizer/${workspaceId}/prompts`),
-
-  // Prompts (full content + edit)
-  getPromptFull: (workspaceId: string, promptId: string) =>
-    request<PromptTemplate & { content: string }>(`/optimizer/${workspaceId}/prompts/${promptId}`),
-  updatePrompt: (workspaceId: string, promptId: string, content: string) =>
-    request<PromptTemplate>(`/optimizer/${workspaceId}/prompts/${promptId}`, {
-      method: "PUT",
-      body: JSON.stringify({ content }),
-    }),
-  getWeights: (workspaceId: string) =>
-    request<ScoringWeights[]>(`/optimizer/${workspaceId}/weights`),
-
-  // Reddit
-  getRedditStats: (workspaceId: string) =>
-    request<RedditStats>(`/reddit/${workspaceId}/stats`),
-  getRedditActions: (workspaceId: string) =>
-    request<RedditAction[]>(`/reddit/${workspaceId}/actions`),
 
   // Instantly
   listInstantlyCampaigns: (apiKey: string) =>
@@ -90,25 +70,34 @@ export const api = {
     if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
     return res.json();
   },
+
+  // Mock endpoints
+  getMockLeads: (status?: string) => {
+    const qs = status ? `?status=${status}` : "";
+    return request<MockLead[]>(`/mock/leads${qs}`);
+  },
+  getMockPipelineCounts: () => request<Record<string, number>>("/mock/pipeline/counts"),
+  getMockVariants: () => request<CccVariant[]>("/mock/variants"),
+  getMockExplorerSuggestion: () => request<ExplorerSuggestion>("/mock/explorer-suggestion"),
+  getMockSettings: () => request<MockSettings>("/mock/settings"),
+  updateMockSettings: (data: Partial<MockSettings>) =>
+    request<MockSettings>("/mock/settings", { method: "PATCH", body: JSON.stringify(data) }),
 };
 
-// Types
+// ── Types ──────────────────────────────────────────────────────────────────────
+
 export interface Workspace {
   id: string;
   name: string;
   owner_email: string;
-  business_profile: Record<string, unknown>;
+  business_profile: Record<string, string>;
   icp_config: Record<string, unknown>;
+  instantly_api_key?: string;
+  instantly_campaign_id?: string;
   status: string;
   daily_lead_target: number;
   min_score_threshold: number;
   created_at: string;
-}
-
-export interface WorkspaceStats {
-  leads_by_status: Record<string, number>;
-  emails_sent: number;
-  replies: number;
 }
 
 export interface PipelineStatus {
@@ -131,24 +120,62 @@ export interface Lead {
   created_at: string;
 }
 
+export interface MockLead extends Lead {
+  variant_type: string | null;
+  interest_status: number;
+  updated_at: string;
+}
+
 export interface PerformanceSummary {
   summary: {
     total_sent: number;
-    opened: number;
-    replied: number;
     positive_replies: number;
+    negative_replies: number;
     bounced: number;
-    open_rate_pct: number;
-    reply_rate_pct: number;
+    positive_rate_pct: number;
   };
   ab_breakdown: Array<{
-    body_variant: string;
-    subject_variant: string;
+    variant_type: string;
     sent: number;
-    opened: number;
-    replied: number;
+    positive: number;
+    negative: number;
+    positive_rate: number;
   }>;
-  daily: Array<{ day: string; sent: number; replied: number }>;
+}
+
+export interface CccVariant {
+  id: string;
+  name: string;
+  role: "CHAMPION" | "CHALLENGER" | "EXPLORER";
+  body_preview: string;
+  subject_preview: string;
+  sent: number;
+  positive: number;
+  negative: number;
+  positive_rate: number;
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  weight_pct: number;
+  status: string;
+}
+
+export interface ExplorerSuggestion {
+  analysis: string;
+  new_prompt: string;
+  generated_at: string;
+}
+
+export interface MockSettings {
+  workspace_id: string;
+  business_profile: {
+    company_name: string;
+    product_description: string;
+    value_prop: string;
+    case_study: string;
+  };
+  instantly_api_key: string;
+  instantly_campaign_id: string;
+  anthropic_api_key: string;
+  active_campaign_name: string;
 }
 
 export interface OptimizationRun {
@@ -157,9 +184,6 @@ export interface OptimizationRun {
   period_start: string;
   period_end: string;
   emails_analyzed: number;
-  avg_open_rate: number;
-  avg_reply_rate: number;
-  benchmark_reply_rate: number;
   changes_made: Record<string, unknown>;
   claude_reasoning: string;
   confidence: number;
@@ -176,33 +200,6 @@ export interface PromptTemplate {
   created_by: string;
   content_preview: string;
   created_at: string;
-}
-
-export interface ScoringWeights {
-  id: string;
-  version: number;
-  is_active: boolean;
-  weights: Record<string, number>;
-  min_score_threshold: number;
-  rationale: string | null;
-  created_at: string;
-}
-
-export interface RedditStats {
-  comments: number;
-  dms: number;
-  total_processed: number;
-  warm_leads_found: number;
-}
-
-export interface RedditAction {
-  id: string;
-  action_type: string;
-  content: string;
-  reddit_author: string;
-  subreddit: string;
-  post_title: string;
-  performed_at: string;
 }
 
 export interface CsvPreview {

@@ -1,27 +1,40 @@
 """
-Instantly.ai API client.
-- Adds leads to campaigns
-- Syncs performance stats back to DB
+Instantly.ai v2 API client.
+- Bearer token auth: Authorization: Bearer {api_key}
+- Base URL: https://api.instantly.ai/api/v2/
+- Primary signal: interest_status (1/2/3=positive, -1/-2/-3=negative, 0=neutral)
 """
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
-from config import settings
 
-INSTANTLY_BASE = "https://api.instantly.ai/api/v1"
+INSTANTLY_BASE = "https://api.instantly.ai/api/v2"
 
 
 class InstantlyClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
-
-    def _params(self, extra: dict | None = None) -> dict:
-        p = {"api_key": self.api_key}
-        if extra:
-            p.update(extra)
-        return p
+        self.headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def add_lead(
+    async def list_campaigns(self) -> list[dict]:
+        """List all campaigns. Returns [{id, name, status, ...}]"""
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                f"{INSTANTLY_BASE}/campaigns",
+                headers=self.headers,
+                params={"limit": 100},
+            )
+            resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list):
+            return data
+        return data.get("items", data.get("data", []))
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    async def add_lead_to_campaign(
         self,
         campaign_id: str,
         email: str,
@@ -30,6 +43,7 @@ class InstantlyClient:
         company: str,
         custom_variables: dict | None = None,
     ) -> dict:
+        """Add a lead to a campaign with custom variables for CCC email body/subject."""
         payload = {
             "campaign_id": campaign_id,
             "email": email,
@@ -38,69 +52,46 @@ class InstantlyClient:
             "company_name": company,
         }
         if custom_variables:
-            payload["custom_variables"] = custom_variables
+            payload["variables"] = custom_variables
 
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
-                f"{INSTANTLY_BASE}/lead/add",
-                params={"api_key": self.api_key},
+                f"{INSTANTLY_BASE}/leads",
+                headers=self.headers,
                 json=payload,
             )
             resp.raise_for_status()
         return resp.json()
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def get_campaign_analytics(self, campaign_id: str) -> dict:
+    async def get_leads_batch(
+        self, campaign_id: str, limit: int = 100, starting_after: str | None = None
+    ) -> list[dict]:
+        """
+        Fetch leads for a campaign with interest_status.
+        Returns [{email, interest_status, ...}]
+        """
+        payload: dict = {"campaign_id": campaign_id, "limit": limit}
+        if starting_after:
+            payload["starting_after"] = starting_after
+
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                f"{INSTANTLY_BASE}/analytics/campaign/summary",
-                params=self._params({"campaign_id": campaign_id}),
-            )
-            resp.raise_for_status()
-        return resp.json()
-
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def get_lead_status(self, instantly_lead_id: str) -> dict:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(
-                f"{INSTANTLY_BASE}/lead",
-                params=self._params({"id": instantly_lead_id}),
-            )
-            resp.raise_for_status()
-        return resp.json()
-
-    async def list_campaigns(self) -> list[dict]:
-        """List all campaigns for this API key."""
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(
-                f"{INSTANTLY_BASE}/campaign/list",
-                params=self._params({"limit": 100, "skip": 0}),
+            resp = await client.post(
+                f"{INSTANTLY_BASE}/leads/list",
+                headers=self.headers,
+                json=payload,
             )
             resp.raise_for_status()
         data = resp.json()
-        # API returns list directly or wrapped in {"data": [...]}
         if isinstance(data, list):
             return data
-        return data.get("data", [])
-
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def get_replies(self, campaign_id: str, limit: int = 100, skip: int = 0) -> list[dict]:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                f"{INSTANTLY_BASE}/reply/list",
-                params=self._params({
-                    "campaign_id": campaign_id,
-                    "limit": limit,
-                    "skip": skip,
-                }),
-            )
-            resp.raise_for_status()
-        return resp.json().get("data", [])
+        return data.get("items", data.get("data", []))
 
 
 async def sync_performance_for_workspace(workspace_id, conn) -> int:
     """
-    Pull latest stats from Instantly for a workspace and update email_performance.
+    Pull latest interest_status from Instantly v2 for a workspace.
+    Updates email_performance.interest_status.
     Returns number of records synced.
     """
     workspace = await conn.fetchrow(
@@ -111,94 +102,57 @@ async def sync_performance_for_workspace(workspace_id, conn) -> int:
         return 0
 
     client = InstantlyClient(workspace["instantly_api_key"])
+    campaign_id = workspace["instantly_campaign_id"]
+    if not campaign_id:
+        return 0
+
     synced = 0
+    starting_after = None
 
-    # Get all sends that haven't been synced yet or need refresh
-    sends = await conn.fetch(
-        """
-        SELECT es.id, es.instantly_lead_id, es.lead_id
-        FROM email_sends es
-        LEFT JOIN email_performance ep ON ep.send_id = es.id
-        WHERE es.workspace_id = $1
-          AND es.instantly_lead_id IS NOT NULL
-          AND (ep.synced_at IS NULL OR ep.synced_at < NOW() - interval '1 hour')
-        LIMIT 200
-        """,
-        workspace_id,
-    )
+    while True:
+        leads = await client.get_leads_batch(campaign_id, limit=100, starting_after=starting_after)
+        if not leads:
+            break
 
-    for send in sends:
-        try:
-            data = await client.get_lead_status(send["instantly_lead_id"])
-            await _upsert_performance(conn, workspace_id, send, data)
+        for lead_data in leads:
+            email = lead_data.get("email")
+            interest_status = lead_data.get("interest_status", 0)
+            if not email:
+                continue
+
+            # Find send record by email + workspace
+            send = await conn.fetchrow(
+                """
+                SELECT es.id, es.lead_id FROM email_sends es
+                JOIN leads l ON l.id = es.lead_id
+                WHERE es.workspace_id = $1 AND l.email = $2
+                ORDER BY es.sent_at DESC LIMIT 1
+                """,
+                workspace_id,
+                email,
+            )
+            if not send:
+                continue
+
+            await conn.execute(
+                """
+                INSERT INTO email_performance
+                    (workspace_id, send_id, lead_id, interest_status, synced_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                ON CONFLICT (send_id) DO UPDATE SET
+                    interest_status = EXCLUDED.interest_status,
+                    synced_at = NOW()
+                """,
+                workspace_id,
+                send["id"],
+                send["lead_id"],
+                interest_status,
+            )
             synced += 1
-        except Exception:
-            continue
+
+        # Pagination
+        if len(leads) < 100:
+            break
+        starting_after = leads[-1].get("id") or leads[-1].get("email")
 
     return synced
-
-
-async def _upsert_performance(conn, workspace_id, send: dict, instantly_data: dict):
-    from datetime import datetime, timezone
-    import json
-
-    opened = instantly_data.get("opened", False) or instantly_data.get("is_opened", False)
-    open_count = instantly_data.get("open_count", 1 if opened else 0)
-    replied = instantly_data.get("replied", False) or instantly_data.get("is_replied", False)
-    reply_text = instantly_data.get("reply_text") or instantly_data.get("last_reply", "")
-    bounced = instantly_data.get("bounced", False) or instantly_data.get("is_bounced", False)
-    unsubscribed = instantly_data.get("unsubscribed", False)
-
-    # Simple sentiment classification
-    reply_sentiment = None
-    if replied and reply_text:
-        reply_sentiment = _classify_reply_sentiment(reply_text)
-
-    await conn.execute(
-        """
-        INSERT INTO email_performance
-            (workspace_id, send_id, lead_id, opened, open_count,
-             replied, reply_text, reply_sentiment, bounced, unsubscribed, synced_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-        ON CONFLICT (send_id) DO UPDATE SET
-            opened = EXCLUDED.opened,
-            open_count = EXCLUDED.open_count,
-            replied = EXCLUDED.replied,
-            reply_text = EXCLUDED.reply_text,
-            reply_sentiment = EXCLUDED.reply_sentiment,
-            bounced = EXCLUDED.bounced,
-            unsubscribed = EXCLUDED.unsubscribed,
-            synced_at = NOW()
-        """,
-        workspace_id,
-        send["id"],
-        send["lead_id"],
-        opened,
-        open_count,
-        replied,
-        reply_text,
-        reply_sentiment,
-        bounced,
-        unsubscribed,
-    )
-
-
-def _classify_reply_sentiment(text: str) -> str:
-    text_lower = text.lower()
-    negative_signals = [
-        "not interested", "no thanks", "remove me", "unsubscribe",
-        "don't contact", "please stop", "wrong person", "not relevant",
-    ]
-    positive_signals = [
-        "interested", "tell me more", "let's connect", "sounds good",
-        "can we talk", "schedule", "call", "demo", "more info",
-    ]
-    ooo_signals = ["out of office", "vacation", "away", "on leave", "maternity"]
-
-    if any(s in text_lower for s in ooo_signals):
-        return "ooo"
-    if any(s in text_lower for s in negative_signals):
-        return "negative"
-    if any(s in text_lower for s in positive_signals):
-        return "positive"
-    return "neutral"

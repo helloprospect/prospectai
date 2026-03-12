@@ -2,7 +2,6 @@
 APScheduler configuration.
 All scheduled jobs live here — no n8n needed.
 """
-import asyncio
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -13,7 +12,6 @@ scheduler = AsyncIOScheduler()
 
 
 def start_scheduler():
-    # Email pipeline: every 4 hours for all active workspaces
     scheduler.add_job(
         _run_pipeline_all,
         trigger=IntervalTrigger(hours=4),
@@ -21,8 +19,6 @@ def start_scheduler():
         replace_existing=True,
         misfire_grace_time=300,
     )
-
-    # Nightly optimizer: midnight UTC
     scheduler.add_job(
         _run_optimizer_all,
         trigger=CronTrigger(hour=0, minute=0, timezone="UTC"),
@@ -30,17 +26,6 @@ def start_scheduler():
         replace_existing=True,
         misfire_grace_time=600,
     )
-
-    # Reddit monitor: every 30 minutes
-    scheduler.add_job(
-        _run_reddit_all,
-        trigger=IntervalTrigger(minutes=30),
-        id="reddit_monitor",
-        replace_existing=True,
-        misfire_grace_time=120,
-    )
-
-    # Instantly stats sync: every hour
     scheduler.add_job(
         _sync_instantly_all,
         trigger=IntervalTrigger(hours=1),
@@ -48,19 +33,14 @@ def start_scheduler():
         replace_existing=True,
         misfire_grace_time=300,
     )
-
     scheduler.start()
-    logger.info("[scheduler] Started: pipeline=4h, optimizer=nightly, reddit=30min, sync=1h")
+    logger.info("[scheduler] Started: pipeline=4h, optimizer=nightly, sync=1h")
 
 
 def stop_scheduler():
     scheduler.shutdown(wait=False)
     logger.info("[scheduler] Stopped")
 
-
-# ============================================================
-# Job wrappers — gather all active workspaces and run
-# ============================================================
 
 async def _run_pipeline_all():
     from services.email_pipeline import run_pipeline
@@ -80,16 +60,6 @@ async def _run_optimizer_all():
         logger.error(f"[scheduler] Optimizer failed: {e}")
 
 
-async def _run_reddit_all():
-    from services.reddit_service import run_reddit_monitor
-    workspace_ids = await _get_reddit_enabled_workspace_ids()
-    for wid in workspace_ids:
-        try:
-            await run_reddit_monitor(wid)
-        except Exception as e:
-            logger.error(f"[scheduler] Reddit monitor failed for workspace {wid}: {e}")
-
-
 async def _sync_instantly_all():
     import db
     from services.instantly_sync import sync_performance_for_workspace
@@ -106,13 +76,4 @@ async def _get_active_workspace_ids():
     import db
     async with db.get_conn() as conn:
         rows = await conn.fetch("SELECT id FROM workspaces WHERE status = 'active'")
-    return [r["id"] for r in rows]
-
-
-async def _get_reddit_enabled_workspace_ids():
-    import db
-    async with db.get_conn() as conn:
-        rows = await conn.fetch(
-            "SELECT id FROM workspaces WHERE status = 'active' AND (reddit_config->>'enabled')::boolean = true"
-        )
     return [r["id"] for r in rows]

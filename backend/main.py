@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import db
 from config import settings
 from scheduler import start_scheduler, stop_scheduler
-from routers import workspaces, campaigns, leads, performance, optimizer, reddit, admin
+from routers import workspaces, campaigns, leads, performance, optimizer, admin, mock
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +63,8 @@ app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"]
 app.include_router(leads.router, prefix="/api/leads", tags=["leads"])
 app.include_router(performance.router, prefix="/api/performance", tags=["performance"])
 app.include_router(optimizer.router, prefix="/api/optimizer", tags=["optimizer"])
-app.include_router(reddit.router, prefix="/api/reddit", tags=["reddit"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+app.include_router(mock.router, prefix="/api/mock", tags=["mock"])
 
 
 @app.get("/health")
