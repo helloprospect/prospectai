@@ -70,6 +70,66 @@ async def list_prompts(workspace_id: UUID):
     return [dict(r) for r in rows]
 
 
+@router.get("/{workspace_id}/prompts/{prompt_id}")
+async def get_prompt_full(workspace_id: UUID, prompt_id: UUID):
+    async with db.get_conn() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, template_type, version, is_active,
+                   performance_score, created_by, created_at, retired_at, content
+            FROM prompt_templates
+            WHERE id = $1 AND workspace_id = $2
+            """,
+            prompt_id, workspace_id,
+        )
+    if not row:
+        raise HTTPException(404, "Prompt not found")
+    return dict(row)
+
+
+@router.put("/{workspace_id}/prompts/{prompt_id}")
+async def update_prompt(workspace_id: UUID, prompt_id: UUID, body: dict):
+    """Save a human-edited version of a prompt template."""
+    new_content = body.get("content", "").strip()
+    if not new_content:
+        raise HTTPException(400, "content is required")
+
+    async with db.get_conn() as conn:
+        existing = await conn.fetchrow(
+            "SELECT template_type FROM prompt_templates WHERE id = $1 AND workspace_id = $2",
+            prompt_id, workspace_id,
+        )
+        if not existing:
+            raise HTTPException(404, "Prompt not found")
+
+        template_type = existing["template_type"]
+        from datetime import datetime, timezone
+
+        # Retire current active
+        await conn.execute(
+            """
+            UPDATE prompt_templates
+            SET is_active = false, retired_at = $1
+            WHERE workspace_id = $2 AND template_type = $3 AND is_active = true
+            """,
+            datetime.now(timezone.utc), workspace_id, template_type,
+        )
+        version = await conn.fetchval(
+            "SELECT coalesce(max(version), 0) + 1 FROM prompt_templates WHERE workspace_id = $1 AND template_type = $2",
+            workspace_id, template_type,
+        )
+        new_row = await conn.fetchrow(
+            """
+            INSERT INTO prompt_templates
+                (workspace_id, template_type, version, content, is_active, created_by)
+            VALUES ($1, $2, $3, $4, true, 'human')
+            RETURNING id, template_type, version, is_active, created_by, created_at
+            """,
+            workspace_id, template_type, version, new_content,
+        )
+    return dict(new_row)
+
+
 @router.get("/{workspace_id}/weights")
 async def list_weights(workspace_id: UUID):
     async with db.get_conn() as conn:

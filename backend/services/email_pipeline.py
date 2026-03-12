@@ -129,24 +129,26 @@ async def research_leads(workspace_id: UUID, batch_size: int = 50, concurrency: 
             """,
             workspace_id,
         )
+        workspace = await conn.fetchrow("SELECT * FROM workspaces WHERE id = $1", workspace_id)
 
     if not leads or not prompt_template:
         return 0
 
     template = prompt_template["content"]
+    ws_dict = dict(workspace) if workspace else {}
     semaphore = asyncio.Semaphore(concurrency)
     tasks = [
-        _research_one_lead(workspace_id, dict(lead), template, semaphore)
+        _research_one_lead(workspace_id, dict(lead), template, ws_dict, semaphore)
         for lead in leads
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     return sum(1 for r in results if r is True)
 
 
-async def _research_one_lead(workspace_id: UUID, lead: dict, template: str, sem: asyncio.Semaphore) -> bool:
+async def _research_one_lead(workspace_id: UUID, lead: dict, template: str, workspace: dict, sem: asyncio.Semaphore) -> bool:
     async with sem:
         try:
-            research, tokens = await claude_client.research_lead(template, lead)
+            research, tokens = await claude_client.research_lead(template, lead, workspace=workspace)
             async with db.get_tx() as conn:
                 await conn.execute(
                     """
@@ -204,20 +206,21 @@ async def score_leads(workspace_id: UUID, batch_size: int = 50, concurrency: int
             workspace_id,
         )
         workspace = await conn.fetchrow(
-            "SELECT icp_config, min_score_threshold FROM workspaces WHERE id = $1", workspace_id
+            "SELECT * FROM workspaces WHERE id = $1", workspace_id
         )
 
     if not leads or not prompt_row or not weights_row:
         return 0
 
-    icp = workspace["icp_config"] or {}
+    ws_dict = dict(workspace) if workspace else {}
+    icp = ws_dict.get("icp_config") or {}
     weights = weights_row["weights"] or {}
-    threshold = workspace["min_score_threshold"] or weights_row["min_score_threshold"] or 50
+    threshold = ws_dict.get("min_score_threshold") or weights_row["min_score_threshold"] or 50
 
     semaphore = asyncio.Semaphore(concurrency)
     tasks = [
         _score_one_lead(workspace_id, dict(lead), prompt_row["content"], prompt_row["id"],
-                        weights_row["id"], weights, icp, threshold, semaphore)
+                        weights_row["id"], weights, icp, threshold, ws_dict, semaphore)
         for lead in leads
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -225,7 +228,7 @@ async def score_leads(workspace_id: UUID, batch_size: int = 50, concurrency: int
 
 
 async def _score_one_lead(
-    workspace_id, lead, template, template_id, weights_id, weights, icp, threshold, sem
+    workspace_id, lead, template, template_id, weights_id, weights, icp, threshold, workspace, sem
 ) -> bool:
     async with sem:
         try:
@@ -237,7 +240,7 @@ async def _score_one_lead(
                 "buying_signals": lead.get("buying_signals", []),
                 "decision_maker_bio": lead.get("decision_maker_bio", ""),
             }
-            score, tokens = await claude_client.score_lead(template, lead, research, weights, icp)
+            score, tokens = await claude_client.score_lead(template, lead, research, weights, icp, workspace=workspace)
 
             total = score.get("total_score", 0)
             new_status = "archived" if total < threshold else "scored"
@@ -299,7 +302,13 @@ async def personalize_leads(workspace_id: UUID, batch_size: int = 50, concurrenc
         }
         workspace = await conn.fetchrow("SELECT * FROM workspaces WHERE id = $1", workspace_id)
 
-    if not leads or not all(k in templates for k in ["body_a", "body_b", "subject_a", "subject_b"]):
+    # Require at minimum champion + challenger for body and subject
+    required = ["body_champion", "body_challenger", "subject_champion", "subject_challenger"]
+    if not leads or not all(k in templates for k in required):
+        logger.warning(
+            f"[personalization] Missing CCC templates for workspace {workspace_id}. "
+            f"Found: {list(templates.keys())}"
+        )
         return 0
 
     ws_dict = dict(workspace)
@@ -323,9 +332,12 @@ async def _personalize_one_lead(workspace_id, lead, templates, workspace, sem) -
             }
             score_data = lead.get("score_breakdown") or {}
 
-            variants, tokens = await claude_client.personalize_email(
-                templates["body_a"], templates["body_b"],
-                templates["subject_a"], templates["subject_b"],
+            variants, tokens = await claude_client.generate_ccc_variants(
+                templates["body_champion"],
+                templates.get("body_challenger", templates["body_champion"]),
+                templates.get("body_explorer", templates["body_champion"]),
+                templates["subject_champion"],
+                templates.get("subject_challenger", templates["subject_champion"]),
                 lead, research, score_data, workspace,
             )
 
@@ -333,14 +345,19 @@ async def _personalize_one_lead(workspace_id, lead, templates, workspace, sem) -
                 await conn.execute(
                     """
                     INSERT INTO email_variants
-                        (workspace_id, lead_id, body_a, body_b, subject_a, subject_b, tokens_used)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7)
+                        (workspace_id, lead_id,
+                         body_champion, body_challenger, body_explorer,
+                         subject_champion, subject_challenger, subject_explorer,
+                         tokens_used)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
                     """,
                     workspace_id, lead["id"],
-                    variants.get("body_a", ""),
-                    variants.get("body_b", ""),
-                    variants.get("subject_a", ""),
-                    variants.get("subject_b", ""),
+                    variants.get("body_champion", ""),
+                    variants.get("body_challenger", ""),
+                    variants.get("body_explorer", ""),
+                    variants.get("subject_champion", ""),
+                    variants.get("subject_challenger", ""),
+                    variants.get("subject_explorer", ""),
                     tokens,
                 )
                 await conn.execute(
@@ -368,7 +385,9 @@ async def send_leads(workspace_id: UUID, batch_size: int = 100) -> int:
         leads = await conn.fetch(
             """
             SELECT l.id, l.email, l.first_name, l.last_name, l.company,
-                   ev.id as variant_id, ev.body_a, ev.body_b, ev.subject_a, ev.subject_b
+                   ev.id as variant_id,
+                   ev.body_champion, ev.body_challenger, ev.body_explorer,
+                   ev.subject_champion, ev.subject_challenger, ev.subject_explorer
             FROM leads l
             JOIN email_variants ev ON ev.lead_id = l.id
             WHERE l.workspace_id = $1 AND l.status = 'personalized'
@@ -385,12 +404,28 @@ async def send_leads(workspace_id: UUID, batch_size: int = 100) -> int:
     campaign_id = workspace["instantly_campaign_id"]
     sent = 0
 
+    # CCC weights: Champion 60%, Challenger 25%, Explorer 15%
+    _CCC_POPULATION = (
+        ["CHAMPION"] * 60 + ["CHALLENGER"] * 25 + ["EXPLORER"] * 15
+    )
+
     for lead in leads:
-        # Random A/B assignment for equal distribution
-        body_variant = random.choice(["A", "B"])
-        subject_variant = random.choice(["A", "B"])
-        selected_body = lead["body_a"] if body_variant == "A" else lead["body_b"]
-        selected_subject = lead["subject_a"] if subject_variant == "A" else lead["subject_b"]
+        variant_type = random.choice(_CCC_POPULATION)
+        if variant_type == "CHAMPION":
+            selected_body = lead["body_champion"]
+            selected_subject = lead["subject_champion"]
+        elif variant_type == "CHALLENGER":
+            selected_body = lead["body_challenger"]
+            selected_subject = lead["subject_challenger"]
+        else:
+            selected_body = lead["body_explorer"]
+            selected_subject = lead["subject_explorer"]
+
+        # Fallback to champion if explorer/challenger is missing
+        if not selected_body:
+            selected_body = lead["body_champion"]
+            selected_subject = lead["subject_champion"]
+            variant_type = "CHAMPION"
 
         try:
             result = await client.add_lead(
@@ -411,12 +446,11 @@ async def send_leads(workspace_id: UUID, batch_size: int = 100) -> int:
                     """
                     INSERT INTO email_sends
                         (workspace_id, lead_id, variant_id, instantly_lead_id, campaign_id,
-                         body_variant, subject_variant, status, sent_at)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,'sent', NOW())
+                         variant_type, status, sent_at)
+                    VALUES ($1,$2,$3,$4,$5,$6,'sent', NOW())
                     """,
                     workspace_id, lead["id"], lead["variant_id"],
-                    instantly_lead_id, campaign_id,
-                    body_variant, subject_variant,
+                    instantly_lead_id, campaign_id, variant_type,
                 )
                 await conn.execute(
                     "UPDATE leads SET status = 'sent' WHERE id = $1", lead["id"]

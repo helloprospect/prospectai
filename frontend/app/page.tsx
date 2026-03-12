@@ -1,4 +1,29 @@
-import { redirect } from "next/navigation";
+"use client";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { api } from "@/lib/api";
+
 export default function Home() {
-  redirect("/dashboard");
+  const router = useRouter();
+
+  useEffect(() => {
+    api.getWorkspaces().then((workspaces) => {
+      if (workspaces.length === 0) {
+        router.replace("/onboarding");
+      } else {
+        router.replace("/dashboard");
+      }
+    }).catch(() => {
+      router.replace("/onboarding");
+    });
+  }, [router]);
+
+  return (
+    <div className="min-h-screen bg-[#09090b] flex items-center justify-center">
+      <div className="flex items-center gap-2.5">
+        <div className="w-7 h-7 rounded-lg bg-brand-500 animate-pulse" />
+        <span className="text-sm text-[#52525b]">Loading…</span>
+      </div>
+    </div>
+  );
 }

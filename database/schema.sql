@@ -204,12 +204,15 @@ CREATE TABLE email_variants (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id        UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     lead_id             UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
-    body_a              TEXT,
-    body_b              TEXT,
-    subject_a           TEXT,
-    subject_b           TEXT,
+    -- CCC: Champion (proven) / Challenger (testing) / Explorer (experimental)
+    body_champion       TEXT,
+    body_challenger     TEXT,
+    body_explorer       TEXT,
+    subject_champion    TEXT,
+    subject_challenger  TEXT,
+    subject_explorer    TEXT,
     prompt_template_ids JSONB,
-    -- {"body_a": "uuid", "body_b": "uuid", "subject_a": "uuid", "subject_b": "uuid"}
+    -- {"body_champion": "uuid", "body_challenger": "uuid", ...}
     tokens_used         INTEGER,
     generated_at        TIMESTAMPTZ DEFAULT NOW()
 );
@@ -221,8 +224,7 @@ CREATE TABLE email_sends (
     variant_id              UUID REFERENCES email_variants(id),
     instantly_lead_id       TEXT,
     campaign_id             TEXT,
-    body_variant            TEXT,   -- 'A' | 'B'
-    subject_variant         TEXT,   -- 'A' | 'B'
+    variant_type            TEXT,   -- 'CHAMPION' | 'CHALLENGER' | 'EXPLORER'
     sent_at                 TIMESTAMPTZ,
     status                  TEXT DEFAULT 'queued'
     -- queued | sent | bounced | error

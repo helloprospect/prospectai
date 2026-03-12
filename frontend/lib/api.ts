@@ -50,11 +50,39 @@ export const api = {
   getPrompts: (workspaceId: string) =>
     request<PromptTemplate[]>(`/optimizer/${workspaceId}/prompts`),
 
+  // Prompts (full content + edit)
+  getPromptFull: (workspaceId: string, promptId: string) =>
+    request<PromptTemplate & { content: string }>(`/optimizer/${workspaceId}/prompts/${promptId}`),
+  updatePrompt: (workspaceId: string, promptId: string, content: string) =>
+    request<PromptTemplate>(`/optimizer/${workspaceId}/prompts/${promptId}`, {
+      method: "PUT",
+      body: JSON.stringify({ content }),
+    }),
+  getWeights: (workspaceId: string) =>
+    request<ScoringWeights[]>(`/optimizer/${workspaceId}/weights`),
+
   // Reddit
   getRedditStats: (workspaceId: string) =>
     request<RedditStats>(`/reddit/${workspaceId}/stats`),
   getRedditActions: (workspaceId: string) =>
     request<RedditAction[]>(`/reddit/${workspaceId}/actions`),
+
+  // CSV Import
+  csvPreview: async (workspaceId: string, file: File): Promise<CsvPreview> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/leads/${workspaceId}/csv-preview`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+    return res.json();
+  },
+  importCsv: async (workspaceId: string, file: File, mapping: Record<string, string>): Promise<CsvImportResult> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("mapping", JSON.stringify(mapping));
+    const res = await fetch(`${BASE}/leads/${workspaceId}/import-csv`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+    return res.json();
+  },
 };
 
 // Types
@@ -143,6 +171,16 @@ export interface PromptTemplate {
   created_at: string;
 }
 
+export interface ScoringWeights {
+  id: string;
+  version: number;
+  is_active: boolean;
+  weights: Record<string, number>;
+  min_score_threshold: number;
+  rationale: string | null;
+  created_at: string;
+}
+
 export interface RedditStats {
   comments: number;
   dms: number;
@@ -158,4 +196,17 @@ export interface RedditAction {
   subreddit: string;
   post_title: string;
   performed_at: string;
+}
+
+export interface CsvPreview {
+  headers: string[];
+  preview: Record<string, string>[];
+  auto_mapping: Record<string, string>;
+  importable_fields: string[];
+}
+
+export interface CsvImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
 }
