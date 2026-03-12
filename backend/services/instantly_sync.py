@@ -69,6 +69,20 @@ class InstantlyClient:
             resp.raise_for_status()
         return resp.json()
 
+    async def list_campaigns(self) -> list[dict]:
+        """List all campaigns for this API key."""
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                f"{INSTANTLY_BASE}/campaign/list",
+                params=self._params({"limit": 100, "skip": 0}),
+            )
+            resp.raise_for_status()
+        data = resp.json()
+        # API returns list directly or wrapped in {"data": [...]}
+        if isinstance(data, list):
+            return data
+        return data.get("data", [])
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def get_replies(self, campaign_id: str, limit: int = 100, skip: int = 0) -> list[dict]:
         async with httpx.AsyncClient(timeout=30) as client:

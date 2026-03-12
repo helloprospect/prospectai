@@ -67,6 +67,13 @@ export const api = {
   getRedditActions: (workspaceId: string) =>
     request<RedditAction[]>(`/reddit/${workspaceId}/actions`),
 
+  // Instantly
+  listInstantlyCampaigns: (apiKey: string) =>
+    request<{ id: string; name: string }[]>("/workspaces/instantly/campaigns", {
+      method: "POST",
+      body: JSON.stringify({ api_key: apiKey }),
+    }),
+
   // CSV Import
   csvPreview: async (workspaceId: string, file: File): Promise<CsvPreview> => {
     const form = new FormData();

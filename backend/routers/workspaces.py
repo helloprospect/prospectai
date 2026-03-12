@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Any
 import db
+from services.instantly_sync import InstantlyClient
 
 router = APIRouter()
 
@@ -137,6 +138,21 @@ async def workspace_stats(workspace_id: UUID):
         "emails_sent": emails_sent,
         "replies": replies,
     }
+
+
+class InstantlyCampaignsRequest(BaseModel):
+    api_key: str
+
+
+@router.post("/instantly/campaigns")
+async def list_instantly_campaigns(body: InstantlyCampaignsRequest):
+    """Fetch available campaigns for a given Instantly API key."""
+    try:
+        client = InstantlyClient(body.api_key)
+        campaigns = await client.list_campaigns()
+        return [{"id": c.get("id", c.get("campaign_id", "")), "name": c.get("name", "Unnamed")} for c in campaigns]
+    except Exception as e:
+        raise HTTPException(400, f"Could not fetch campaigns: {str(e)}")
 
 
 async def _seed_workspace_prompts(conn, workspace_id: UUID, icp_config: dict):
