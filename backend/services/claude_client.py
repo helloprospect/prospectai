@@ -63,15 +63,31 @@ def parse_json(text: str) -> dict | list:
 async def research_lead(
     prompt_template: str,
     lead: dict,
+    workspace: dict | None = None,
 ) -> tuple[dict, int]:
     """Run the research prompt for a single lead."""
+    bp = (workspace or {}).get("business_profile") or {}
+    icp = (workspace or {}).get("icp_config") or {}
     filled = _fill_template(prompt_template, {
-        "company": lead.get("company", ""),
-        "website": lead.get("website", ""),
+        # Lead-specific
         "first_name": lead.get("first_name", ""),
         "last_name": lead.get("last_name", ""),
         "title": lead.get("title", ""),
+        "company_name": lead.get("company", ""),
+        "company": lead.get("company", ""),  # backward compat
+        "website": lead.get("website", ""),
+        "website_url": lead.get("website", ""),
         "linkedin_url": lead.get("linkedin_url", ""),
+        "industry": lead.get("industry", ""),
+        "country": lead.get("country", lead.get("location", "")),
+        "city": lead.get("city", ""),
+        # Sender / workspace context
+        "sender_company_name": bp.get("company_name", ""),
+        "sender_description": bp.get("product_description", ""),
+        "sender_role": bp.get("role_description", f"You are a founder at {bp.get('company_name', 'your company')}."),
+        "sender_icp": bp.get("icp_description") or _format_icp(icp),
+        "case_study": bp.get("case_study", ""),
+        "value_prop": bp.get("value_prop", ""),
     })
     system = (
         "You are a precise B2B sales researcher. Always return valid JSON only, "
@@ -86,20 +102,32 @@ async def score_lead(
     research: dict,
     weights: dict,
     icp_config: dict,
+    workspace: dict | None = None,
 ) -> tuple[dict, int]:
+    bp = (workspace or {}).get("business_profile") or {}
     filled = _fill_template(prompt_template, {
+        # Lead fields
         "first_name": lead.get("first_name", ""),
         "last_name": lead.get("last_name", ""),
         "title": lead.get("title", ""),
+        "company_name": lead.get("company", ""),
         "company": lead.get("company", ""),
         "industry": lead.get("industry", ""),
         "company_size": lead.get("company_size", ""),
         "location": lead.get("location", ""),
+        "country": lead.get("country", lead.get("location", "")),
+        # Research
         "research_json": json.dumps(research, indent=2),
+        "research_result": _format_research_text(research, {}),
+        # ICP
         "icp_industries": ", ".join(icp_config.get("industries", [])),
         "icp_sizes": ", ".join(icp_config.get("company_sizes", [])),
         "icp_titles": ", ".join(icp_config.get("titles", [])),
         "weights_json": json.dumps(weights, indent=2),
+        # Sender context
+        "sender_company_name": bp.get("company_name", ""),
+        "sender_description": bp.get("product_description", ""),
+        "sender_icp": bp.get("icp_description") or _format_icp(icp_config),
     })
     system = (
         "You are a lead scoring system. Return valid JSON only. "
@@ -329,6 +357,20 @@ If insufficient data, return empty arrays and low confidence."""
 # ============================================================
 # Helpers
 # ============================================================
+
+def _format_icp(icp: dict) -> str:
+    """Build a readable ICP description from the icp_config dict."""
+    parts = []
+    if icp.get("industries"):
+        parts.append("Industries: " + ", ".join(icp["industries"]))
+    if icp.get("titles"):
+        parts.append("Target titles: " + ", ".join(icp["titles"][:6]))
+    if icp.get("company_sizes"):
+        parts.append("Company sizes: " + ", ".join(icp["company_sizes"]))
+    if icp.get("geographies"):
+        parts.append("Countries: " + ", ".join(icp["geographies"]))
+    return " | ".join(parts) if parts else "B2B companies"
+
 
 def _fill_template(template: str, context: dict) -> str:
     result = template

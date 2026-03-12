@@ -129,24 +129,26 @@ async def research_leads(workspace_id: UUID, batch_size: int = 50, concurrency: 
             """,
             workspace_id,
         )
+        workspace = await conn.fetchrow("SELECT * FROM workspaces WHERE id = $1", workspace_id)
 
     if not leads or not prompt_template:
         return 0
 
     template = prompt_template["content"]
+    ws_dict = dict(workspace) if workspace else {}
     semaphore = asyncio.Semaphore(concurrency)
     tasks = [
-        _research_one_lead(workspace_id, dict(lead), template, semaphore)
+        _research_one_lead(workspace_id, dict(lead), template, ws_dict, semaphore)
         for lead in leads
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     return sum(1 for r in results if r is True)
 
 
-async def _research_one_lead(workspace_id: UUID, lead: dict, template: str, sem: asyncio.Semaphore) -> bool:
+async def _research_one_lead(workspace_id: UUID, lead: dict, template: str, workspace: dict, sem: asyncio.Semaphore) -> bool:
     async with sem:
         try:
-            research, tokens = await claude_client.research_lead(template, lead)
+            research, tokens = await claude_client.research_lead(template, lead, workspace=workspace)
             async with db.get_tx() as conn:
                 await conn.execute(
                     """
@@ -204,20 +206,21 @@ async def score_leads(workspace_id: UUID, batch_size: int = 50, concurrency: int
             workspace_id,
         )
         workspace = await conn.fetchrow(
-            "SELECT icp_config, min_score_threshold FROM workspaces WHERE id = $1", workspace_id
+            "SELECT * FROM workspaces WHERE id = $1", workspace_id
         )
 
     if not leads or not prompt_row or not weights_row:
         return 0
 
-    icp = workspace["icp_config"] or {}
+    ws_dict = dict(workspace) if workspace else {}
+    icp = ws_dict.get("icp_config") or {}
     weights = weights_row["weights"] or {}
-    threshold = workspace["min_score_threshold"] or weights_row["min_score_threshold"] or 50
+    threshold = ws_dict.get("min_score_threshold") or weights_row["min_score_threshold"] or 50
 
     semaphore = asyncio.Semaphore(concurrency)
     tasks = [
         _score_one_lead(workspace_id, dict(lead), prompt_row["content"], prompt_row["id"],
-                        weights_row["id"], weights, icp, threshold, semaphore)
+                        weights_row["id"], weights, icp, threshold, ws_dict, semaphore)
         for lead in leads
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -225,7 +228,7 @@ async def score_leads(workspace_id: UUID, batch_size: int = 50, concurrency: int
 
 
 async def _score_one_lead(
-    workspace_id, lead, template, template_id, weights_id, weights, icp, threshold, sem
+    workspace_id, lead, template, template_id, weights_id, weights, icp, threshold, workspace, sem
 ) -> bool:
     async with sem:
         try:
@@ -237,7 +240,7 @@ async def _score_one_lead(
                 "buying_signals": lead.get("buying_signals", []),
                 "decision_maker_bio": lead.get("decision_maker_bio", ""),
             }
-            score, tokens = await claude_client.score_lead(template, lead, research, weights, icp)
+            score, tokens = await claude_client.score_lead(template, lead, research, weights, icp, workspace=workspace)
 
             total = score.get("total_score", 0)
             new_status = "archived" if total < threshold else "scored"
