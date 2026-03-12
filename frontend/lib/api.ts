@@ -66,6 +66,23 @@ export const api = {
     request<RedditStats>(`/reddit/${workspaceId}/stats`),
   getRedditActions: (workspaceId: string) =>
     request<RedditAction[]>(`/reddit/${workspaceId}/actions`),
+
+  // CSV Import
+  csvPreview: async (workspaceId: string, file: File): Promise<CsvPreview> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/leads/${workspaceId}/csv-preview`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+    return res.json();
+  },
+  importCsv: async (workspaceId: string, file: File, mapping: Record<string, string>): Promise<CsvImportResult> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("mapping", JSON.stringify(mapping));
+    const res = await fetch(`${BASE}/leads/${workspaceId}/import-csv`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+    return res.json();
+  },
 };
 
 // Types
@@ -179,4 +196,17 @@ export interface RedditAction {
   subreddit: string;
   post_title: string;
   performed_at: string;
+}
+
+export interface CsvPreview {
+  headers: string[];
+  preview: Record<string, string>[];
+  auto_mapping: Record<string, string>;
+  importable_fields: string[];
+}
+
+export interface CsvImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
 }

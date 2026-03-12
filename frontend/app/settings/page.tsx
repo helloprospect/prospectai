@@ -71,6 +71,8 @@ function BusinessTab({ wsId }: { wsId: string }) {
     website: bp.website || "",
     product_description: bp.product_description || "",
     value_prop: bp.value_prop || "",
+    case_study: bp.case_study || "",
+    role_description: bp.role_description || "",
     icp_titles: (icp?.titles || []).join("\n"),
     icp_geographies: (icp?.geographies || []).join(", "),
   };
@@ -89,6 +91,8 @@ function BusinessTab({ wsId }: { wsId: string }) {
           website: current.website,
           product_description: current.product_description,
           value_prop: current.value_prop,
+          case_study: current.case_study,
+          role_description: current.role_description,
         },
         icp_config: {
           ...(icp || {}),
@@ -127,6 +131,12 @@ function BusinessTab({ wsId }: { wsId: string }) {
         </Field>
         <Field label="Value Prop" hint="We help X achieve Y by Z">
           <Input value={current.value_prop} onChange={(v) => set("value_prop", v)} placeholder="We help B2B founders get 10+ demos/month…" />
+        </Field>
+        <Field label="Proof / Case Study" hint="Used in every email — be specific with numbers">
+          <Input value={current.case_study} onChange={(v) => set("case_study", v)} placeholder="50 meetings for Figure8 (Belgian agency) in 90 days" />
+        </Field>
+        <Field label="Email Persona" hint="How you present yourself — injected as {{sender_role}}">
+          <Input value={current.role_description} onChange={(v) => set("role_description", v)} placeholder="You are a founder at Acme, reaching out peer-to-peer to other founders." />
         </Field>
       </Section>
 
