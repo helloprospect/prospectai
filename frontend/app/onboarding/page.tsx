@@ -44,6 +44,8 @@ function defaultData() {
       product_description: "",
       value_prop: "",
       pain_points: ["", "", ""],
+      case_study: "",
+      role_description: "",
     },
     icp_config: {
       industries: [] as string[],
@@ -305,6 +307,22 @@ function StepBusiness({ data, update }: { data: any; update: (p: string, v: unkn
           placeholder="We help B2B founders get 10+ demos/month by writing emails that feel human"
           value={data.business_profile.value_prop}
           onChange={(e) => update("business_profile.value_prop", e.target.value)}
+        />
+      </Field>
+      <Field label="Proof / Case Study" hint="Your best result — used in every email. Be specific.">
+        <input
+          className={inputClass}
+          placeholder="We got 50 meetings for Figure8 (Belgian agency) in 90 days"
+          value={data.business_profile.case_study}
+          onChange={(e) => update("business_profile.case_study", e.target.value)}
+        />
+      </Field>
+      <Field label="Your email persona" hint="Optional — how you present yourself in emails">
+        <input
+          className={inputClass}
+          placeholder="You are a founder at Acme, reaching out peer-to-peer to other founders."
+          value={data.business_profile.role_description}
+          onChange={(e) => update("business_profile.role_description", e.target.value)}
         />
       </Field>
     </div>

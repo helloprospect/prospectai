@@ -108,58 +108,93 @@ async def score_lead(
     return await complete_json(system, filled, max_tokens=800)
 
 
-async def personalize_email(
-    body_a_template: str,
-    body_b_template: str,
-    subject_a_template: str,
-    subject_b_template: str,
+async def generate_ccc_variants(
+    body_champion_template: str,
+    body_challenger_template: str,
+    body_explorer_template: str,
+    subject_champion_template: str,
+    subject_challenger_template: str,
     lead: dict,
     research: dict,
     score: dict,
     workspace: dict,
 ) -> tuple[dict, int]:
-    """Generate all 4 email variants in one API call to save cost."""
-    research_summary = _research_summary(research)
+    """
+    Generate Champion / Challenger / Explorer email variants in one API call.
+    Returns dict with keys: body_champion, body_challenger, body_explorer,
+                            subject_champion, subject_challenger, subject_explorer
+    """
+    bp = workspace.get("business_profile") or {}
+    research_text = _format_research_text(research, score)
+    country = lead.get("country", lead.get("location", ""))
+    language_rule = "dutch" if any(c in country.lower() for c in ["netherlands", "belgium", "nederland", "belgique", "belgie"]) else "english"
+
     context = {
+        # Lead data
         "first_name": lead.get("first_name", ""),
         "last_name": lead.get("last_name", ""),
         "title": lead.get("title", ""),
-        "company": lead.get("company", ""),
+        "company_name": lead.get("company", ""),
         "industry": lead.get("industry", ""),
+        "country": country,
+        "city": lead.get("city", ""),
+        "website_url": lead.get("website", ""),
+        "linkedin_url": lead.get("linkedin_url", ""),
+        # Research + scoring
+        "research_result": research_text,
         "primary_angle": score.get("primary_angle", ""),
-        "research_summary": research_summary,
-        "sender_company": workspace.get("business_profile", {}).get("company_name", ""),
-        "product_description": workspace.get("business_profile", {}).get("product_description", ""),
-        "value_prop": workspace.get("business_profile", {}).get("value_prop", ""),
+        "tier": score.get("tier", "TIER2"),
+        # Workspace / sender context
+        "sender_company_name": bp.get("company_name", ""),
+        "sender_role": bp.get("role_description", f"You are a founder at {bp.get('company_name', 'our company')}."),
+        "sender_description": bp.get("product_description", ""),
+        "sender_icp": bp.get("icp_description", ""),
+        "case_study": bp.get("case_study", ""),
+        "value_prop": bp.get("value_prop", ""),
+        "language_rule": language_rule,
     }
 
-    combined_prompt = f"""Generate all 4 email variants for this lead. Return as JSON with keys: body_a, body_b, subject_a, subject_b.
+    def _fill(template: str) -> str:
+        return _fill_template(template, context)
 
-=== BODY A INSTRUCTIONS ===
-{_fill_template(body_a_template, context)}
+    combined_prompt = f"""Generate 6 email variants for this lead following the exact instructions for each section.
+Return ONLY valid JSON with these keys: body_champion, body_challenger, body_explorer, subject_champion, subject_challenger, subject_explorer.
 
-=== BODY B INSTRUCTIONS ===
-{_fill_template(body_b_template, context)}
+=== BODY CHAMPION (peer-to-peer, story-driven, 50-80 words) ===
+{_fill(body_champion_template)}
 
-=== SUBJECT A INSTRUCTIONS ===
-{_fill_template(subject_a_template, context)}
+=== BODY CHALLENGER (direct/confident Gordon Gekko style, 70-100 words) ===
+{_fill(body_challenger_template)}
 
-=== SUBJECT B INSTRUCTIONS ===
-{_fill_template(subject_b_template, context)}
+=== BODY EXPLORER (ultra-short hypothesis test, 40-60 words) ===
+{_fill(body_explorer_template)}
 
-Return ONLY this JSON structure, no other text:
+=== SUBJECT CHAMPION (keyword juxtaposition style, 2-8 words) ===
+{_fill(subject_champion_template)}
+Note: Generate the subject based on BODY CHAMPION above.
+
+=== SUBJECT CHALLENGER (2-noun combo style, 2-6 words) ===
+{_fill(subject_challenger_template)}
+Note: Generate the subject based on BODY CHALLENGER above.
+
+Return ONLY this JSON, no other text:
 {{
-  "body_a": "...",
-  "body_b": "...",
-  "subject_a": "...",
-  "subject_b": "..."
-}}"""
+  "body_champion": "...",
+  "body_challenger": "...",
+  "body_explorer": "...",
+  "subject_champion": "...",
+  "subject_challenger": "...",
+  "subject_explorer": "..."
+}}
+
+For subject_explorer: create a 2-5 word subject that matches the body_explorer angle. Same language rule as others."""
 
     system = (
         "You write high-converting cold emails. Return valid JSON only. "
-        "Each email must be distinct and follow its specific instructions exactly."
+        "Each variant MUST be distinct — different tone, angle, or length. "
+        "Follow each section's instructions precisely."
     )
-    return await complete_json(system, combined_prompt, max_tokens=2000)
+    return await complete_json(system, combined_prompt, max_tokens=3000)
 
 
 async def classify_reddit_post(posts: list[dict]) -> tuple[list[dict], int]:
@@ -265,7 +300,7 @@ Analyze and return a JSON object:
   "analysis": "2-3 paragraph analysis of what's working and what isn't",
   "prompt_changes": [
     {{
-      "template_type": "body_b",
+      "template_type": "body_challenger",
       "new_content": "full rewritten prompt text",
       "rationale": "why this change"
     }}
@@ -302,12 +337,39 @@ def _fill_template(template: str, context: dict) -> str:
     return result
 
 
-def _research_summary(research: dict) -> str:
+def _format_research_text(research: dict, score: dict) -> str:
+    """
+    Format research JSON + score into structured text matching the prompt's {{research_result}} variable.
+    Handles both:
+    - Old format: research JSON from research_lead() + separate score dict
+    - New format: research step returns structured text directly (stored in company_summary)
+    """
+    # If research already contains structured text (new pipeline), return it directly
+    raw_text = research.get("raw_research_text") or research.get("research_text")
+    if raw_text:
+        return raw_text
+
+    # Build structured text from JSON fields (backward compat)
     parts = []
     if research.get("company_summary"):
-        parts.append(research["company_summary"])
+        parts.append(f"COMPANY: {research['company_summary']}")
+    if research.get("recent_news") and research["recent_news"] != "None found":
+        parts.append(f"NEWS: {research['recent_news']}")
     if research.get("buying_signals"):
-        parts.append("Signals: " + "; ".join(research["buying_signals"][:3]))
-    if research.get("recent_news"):
-        parts.append("News: " + research["recent_news"][:200])
-    return " | ".join(parts)
+        signals = research["buying_signals"]
+        if isinstance(signals, list):
+            parts.append("SIGNALS: " + "; ".join(signals[:4]))
+    if research.get("tech_stack"):
+        stack = research["tech_stack"]
+        if isinstance(stack, list):
+            parts.append("TECH: " + ", ".join(stack[:6]))
+    if research.get("decision_maker_bio"):
+        parts.append(f"PERSON: {research['decision_maker_bio']}")
+    if research.get("linkedin_activity") and research["linkedin_activity"] != "No data":
+        parts.append(f"LINKEDIN: {research['linkedin_activity']}")
+    if score.get("tier"):
+        parts.append(f"TIER: {score['tier']}")
+    if score.get("reasoning"):
+        parts.append(f"SCORING REASON: {score['reasoning']}")
+
+    return "\n".join(parts) if parts else "No research data available."

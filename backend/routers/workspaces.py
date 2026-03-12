@@ -146,7 +146,11 @@ async def _seed_workspace_prompts(conn, workspace_id: UUID, icp_config: dict):
     primary_industry = industries[0] if industries else "general"
 
     # Try to find industry-specific seed prompts, fall back to general
-    for template_type in ["research", "scoring", "body_a", "body_b", "subject_a", "subject_b"]:
+    for template_type in [
+        "research", "scoring",
+        "body_champion", "body_challenger", "body_explorer",
+        "subject_champion", "subject_challenger",
+    ]:
         seed = await conn.fetchrow(
             """
             SELECT * FROM seed_prompts
