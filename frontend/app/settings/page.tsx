@@ -63,7 +63,11 @@ function BusinessTab({ wsId }: { wsId: string }) {
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [form, setForm] = useState<Record<string, any> | null>(null);
+  const [campaignList, setCampaignList] = useState<{id:string;name:string}[]>([]);
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [campaignError, setCampaignError] = useState("");
 
   // Init form once workspace loads
   const current = form ?? {
@@ -75,37 +79,53 @@ function BusinessTab({ wsId }: { wsId: string }) {
     role_description: bp.role_description || "",
     icp_titles: (icp?.titles || []).join("\n"),
     icp_geographies: (icp?.geographies || []).join(", "),
+    instantly_api_key: (workspace as any)?.instantly_api_key || "",
+    instantly_campaign_id: (workspace as any)?.instantly_campaign_id || "",
   };
 
   function set(key: string, val: string) {
     setForm({ ...current, [key]: val });
   }
 
-  async function handleSave() {
-    setSaving(true);
+  async function loadCampaigns() {
+    if (!current.instantly_api_key.trim()) return;
+    setLoadingCampaigns(true); setCampaignError("");
     try {
-      await api.updateWorkspace(wsId, {
+      const result = await api.listInstantlyCampaigns(current.instantly_api_key.trim());
+      setCampaignList(result);
+    } catch { setCampaignError("Could not load campaigns. Check your API key."); }
+    finally { setLoadingCampaigns(false); }
+  }
+
+  async function handleSave() {
+    setSaving(true); setSaveError("");
+    try {
+      const payload: Record<string, any> = {
         business_profile: {
           ...bp,
-          company_name: current.company_name,
-          website: current.website,
-          product_description: current.product_description,
-          value_prop: current.value_prop,
-          case_study: current.case_study,
-          role_description: current.role_description,
+          ...(current.company_name && { company_name: current.company_name }),
+          ...(current.website && { website: current.website }),
+          ...(current.product_description && { product_description: current.product_description }),
+          ...(current.value_prop && { value_prop: current.value_prop }),
+          ...(current.case_study && { case_study: current.case_study }),
+          ...(current.role_description && { role_description: current.role_description }),
         },
         icp_config: {
           ...(icp || {}),
           titles: current.icp_titles.split("\n").map((s: string) => s.trim()).filter(Boolean),
           geographies: current.icp_geographies.split(",").map((s: string) => s.trim()).filter(Boolean),
         },
-      });
+      };
+      if (current.instantly_api_key) payload.instantly_api_key = current.instantly_api_key;
+      if (current.instantly_campaign_id) payload.instantly_campaign_id = current.instantly_campaign_id;
+
+      await api.updateWorkspace(wsId, payload);
       mutateWs();
       setForm(null);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      setSaveError(e.message || "Save failed. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -149,6 +169,30 @@ function BusinessTab({ wsId }: { wsId: string }) {
         </Field>
       </Section>
 
+      <Section title="Instantly Integration">
+        <Field label="API Key">
+          <div className="flex gap-2">
+            <Input value={current.instantly_api_key} onChange={(v) => { set("instantly_api_key", v); setCampaignList([]); }} placeholder="inst_••••••••••••••••••••" />
+            <button type="button" onClick={loadCampaigns} disabled={!current.instantly_api_key.trim() || loadingCampaigns}
+              className="px-4 py-2 rounded-lg bg-[#27272a] text-[#a1a1aa] text-sm whitespace-nowrap disabled:opacity-40 hover:bg-[#3f3f46] transition-colors">
+              {loadingCampaigns ? "Loading…" : "Load Campaigns"}
+            </button>
+          </div>
+          {campaignError && <p className="text-red-400 text-xs mt-1">{campaignError}</p>}
+        </Field>
+        {campaignList.length > 0 && (
+          <Field label="Campaign">
+            <select className={inputBase} value={current.instantly_campaign_id} onChange={e => set("instantly_campaign_id", e.target.value)}>
+              <option value="">— Choose a campaign —</option>
+              {campaignList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </Field>
+        )}
+        {!campaignList.length && current.instantly_campaign_id && (
+          <p className="text-xs text-[#52525b]">Campaign ID saved: {current.instantly_campaign_id}</p>
+        )}
+      </Section>
+
       <div className="flex items-center gap-3">
         <button
           onClick={handleSave}
@@ -157,7 +201,8 @@ function BusinessTab({ wsId }: { wsId: string }) {
         >
           {saving ? "Saving…" : "Save Changes"}
         </button>
-        {saved && <span className="text-xs text-emerald-400">Saved</span>}
+        {saved && <span className="text-xs text-emerald-400">✓ Saved</span>}
+        {saveError && <span className="text-xs text-red-400">{saveError}</span>}
       </div>
     </div>
   );

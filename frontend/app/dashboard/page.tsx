@@ -34,6 +34,8 @@ export default function DashboardPage() {
 
   const summary = (perf as any)?.summary || {};
   const daily = (perf as any)?.daily || [];
+  const totalLeads = counts ? Object.values(counts as Record<string, number>).reduce((a, b) => a + b, 0) : null;
+  const hasNoLeads = totalLeads === 0;
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -42,6 +44,24 @@ export default function DashboardPage() {
         <h1 className="text-xl font-semibold text-[#fafafa]">Dashboard</h1>
         <p className="text-sm text-[#71717a] mt-1">Last 7 days · auto-refreshes every 5 min</p>
       </div>
+
+      {/* Get started banner */}
+      {hasNoLeads && (
+        <div className="mb-6 bg-brand-500/5 border border-brand-500/20 rounded-xl p-5 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-[#fafafa]">Ready to start your first campaign?</p>
+            <p className="text-xs text-[#71717a] mt-0.5">Upload a CSV with your leads — the AI takes it from there.</p>
+          </div>
+          <div className="flex gap-3">
+            <a href="/leads" className="px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium rounded-lg transition-colors">
+              Upload Leads →
+            </a>
+            <a href="/settings" className="px-4 py-2 bg-[#18181b] border border-[#27272a] hover:border-[#3f3f46] text-[#a1a1aa] text-sm rounded-lg transition-colors">
+              Settings
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Top stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -144,7 +164,7 @@ export default function DashboardPage() {
       {(perf as any)?.ab_breakdown?.length > 0 && (
         <div className="bg-[#111113] border border-[#27272a] rounded-xl overflow-hidden">
           <div className="px-5 py-4 border-b border-[#27272a]">
-            <h2 className="text-xs font-medium text-[#71717a] uppercase tracking-widest">A/B Variant Performance</h2>
+            <h2 className="text-xs font-medium text-[#71717a] uppercase tracking-widest">CCC Variant Performance</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

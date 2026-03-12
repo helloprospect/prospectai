@@ -76,4 +76,19 @@
     border: 1px solid var(--border);
     border-radius: 12px;
   }
+
+  .input {
+    width: 100%;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .input::placeholder { color: #3f3f46; }
+  .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-muted); }
+  select.input { cursor: pointer; }
 }

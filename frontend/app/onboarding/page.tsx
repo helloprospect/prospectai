@@ -1,608 +1,450 @@
 "use client";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, CsvPreview } from "@/lib/api";
 
-const STEPS = ["Business", "ICP", "Tone", "Sending", "Launch"];
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-const INDUSTRIES = [
-  { value: "saas", label: "SaaS" },
-  { value: "ecommerce", label: "E-Commerce" },
-  { value: "agency", label: "Agency" },
-  { value: "professional_services", label: "Prof. Services" },
-  { value: "fintech", label: "Fintech" },
-  { value: "healthtech", label: "Healthtech" },
-  { value: "manufacturing", label: "Manufacturing" },
-  { value: "logistics", label: "Logistics" },
-  { value: "real_estate", label: "Real Estate" },
-  { value: "other", label: "Other" },
-];
+interface OnboardingData {
+  workspace_name: string;
+  owner_email: string;
+  company_name: string;
+  product_description: string;
+  value_prop: string;
+  case_study: string;
+  industries: string[];
+  company_sizes: string[];
+  titles: string;
+  geographies: string;
+  instantly_api_key: string;
+  instantly_campaign_id: string;
+  instantly_campaign_name: string;
+}
 
+interface InstantlyCampaign { id: string; name: string; }
+
+const INDUSTRIES = ["SaaS", "E-Commerce", "Agency", "Prof. Services", "Fintech", "Healthtech", "Manufacturing", "Logistics", "Real Estate", "Other"];
 const SIZES = ["1–10", "10–50", "50–200", "200–500", "500–1000", "1000+"];
+const SIZE_MAP: Record<string, string> = {
+  "1–10": "1-10", "10–50": "10-50", "50–200": "50-200",
+  "200–500": "200-500", "500–1000": "500-1000", "1000+": "1000+",
+};
 
-function canAdvance(step: number, data: ReturnType<typeof defaultData>): string | null {
-  if (step === 0) {
-    if (!data.name.trim()) return "Workspace name is required";
-    if (!data.owner_email.trim() || !data.owner_email.includes("@")) return "Valid email is required";
-    if (!data.business_profile.product_description.trim()) return "Describe what you sell";
-    if (!data.business_profile.value_prop.trim()) return "Value prop is required";
-  }
-  if (step === 1) {
-    if (data.icp_config.industries.length === 0) return "Select at least one industry";
-    if (data.icp_config.titles.filter(Boolean).length === 0) return "Add at least one target title";
-  }
-  return null;
-}
+const FIELD_LABELS: Record<string, string> = {
+  email: "Email *", first_name: "First Name", last_name: "Last Name",
+  company: "Company", title: "Job Title", linkedin_url: "LinkedIn URL",
+  website: "Website", industry: "Industry", company_size: "Company Size", location: "Location",
+};
 
-function defaultData() {
-  return {
-    name: "",
-    owner_email: "",
-    business_profile: {
-      company_name: "",
-      website: "",
-      product_description: "",
-      value_prop: "",
-      pain_points: ["", "", ""],
-      case_study: "",
-      role_description: "",
-    },
-    icp_config: {
-      industries: [] as string[],
-      company_sizes: [] as string[],
-      titles: [""],
-      geographies: ["US"],
-      exclusions: [],
-    },
-    tone_config: { style: "direct" as "direct" | "friendly" | "professional" },
-    instantly_api_key: "",
-    instantly_campaign_id: "",
-    daily_lead_target: 50,
-  };
-}
-
-export default function OnboardingPage() {
-  const router = useRouter();
-  const [step, setStep] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState(defaultData);
-
-  function update(path: string, value: unknown) {
-    const keys = path.split(".");
-    setData((prev) => {
-      const next = { ...prev } as Record<string, unknown>;
-      let cur = next;
-      for (let i = 0; i < keys.length - 1; i++) {
-        cur[keys[i]] = { ...(cur[keys[i]] as Record<string, unknown>) };
-        cur = cur[keys[i]] as Record<string, unknown>;
-      }
-      cur[keys[keys.length - 1]] = value;
-      return next as typeof data;
-    });
-  }
-
-  async function handleLaunch() {
-    setLoading(true);
-    try {
-      const payload = {
-        ...data,
-        business_profile: {
-          ...data.business_profile,
-          pain_points: data.business_profile.pain_points.filter(Boolean),
-        },
-        icp_config: {
-          ...data.icp_config,
-          titles: data.icp_config.titles.filter(Boolean),
-        },
-        status: "active",
-      };
-      await api.createWorkspace(payload);
-      router.push("/dashboard");
-    } catch (e) {
-      alert("Error creating workspace. Check console.");
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center p-6">
-      {/* Logo */}
-      <div className="flex items-center gap-2.5 mb-10">
-        <div className="w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center">
-          <svg width="16" height="16" viewBox="0 0 14 14" fill="none">
-            <path d="M2 11L7 3l5 8H2z" fill="white" />
-          </svg>
-        </div>
-        <span className="font-semibold text-[#fafafa] text-base tracking-tight">ProspectAI</span>
-      </div>
-
-      <div className="w-full max-w-lg">
-        {/* Step indicator */}
-        <div className="flex items-center justify-between mb-8">
-          {STEPS.map((s, i) => (
-            <div key={s} className="flex items-center gap-2">
-              <div className="flex flex-col items-center gap-1.5">
-                <div
-                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-all duration-200 ${
-                    i < step
-                      ? "bg-brand-500 text-white"
-                      : i === step
-                      ? "bg-brand-500/20 text-brand-400 ring-1 ring-brand-500/40"
-                      : "bg-[#18181b] text-[#52525b]"
-                  }`}
-                >
-                  {i < step ? (
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                      <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  ) : (
-                    i + 1
-                  )}
-                </div>
-                <span className={`text-[10px] font-medium ${i === step ? "text-brand-400" : "text-[#52525b]"}`}>
-                  {s}
-                </span>
-              </div>
-              {i < STEPS.length - 1 && (
-                <div className={`w-12 h-px mb-4 ${i < step ? "bg-brand-500/40" : "bg-[#27272a]"}`} />
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Card */}
-        <div className="bg-[#111113] border border-[#27272a] rounded-2xl p-8 shadow-xl animate-slide-up">
-          {step === 0 && <StepBusiness data={data} update={update} />}
-          {step === 1 && <StepICP data={data} update={update} />}
-          {step === 2 && <StepTone data={data} update={update} />}
-          {step === 3 && <StepSending data={data} update={update} />}
-          {step === 4 && <StepLaunch data={data} />}
-
-          {error && (
-            <div className="mt-5 px-3.5 py-2.5 bg-red-500/10 border border-red-500/20 rounded-lg">
-              <p className="text-xs text-red-400">{error}</p>
-            </div>
-          )}
-
-          <div className="flex justify-between items-center mt-8 pt-6 border-t border-[#27272a]">
-            <button
-              type="button"
-              onClick={() => { setError(null); setStep(Math.max(0, step - 1)); }}
-              disabled={step === 0}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm text-[#71717a] hover:text-[#a1a1aa] disabled:opacity-0 transition-colors"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M9 11L5 7l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Back
-            </button>
-            {step < 4 ? (
-              <button
-                type="button"
-                onClick={() => {
-                  const err = canAdvance(step, data);
-                  if (err) { setError(err); return; }
-                  setError(null);
-                  setStep(step + 1);
-                }}
-                className="flex items-center gap-1.5 px-5 py-2.5 bg-brand-500 hover:bg-brand-600 rounded-lg text-sm font-medium text-white transition-all duration-150 shadow-glow"
-              >
-                Continue
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleLaunch}
-                disabled={loading}
-                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 rounded-lg text-sm font-medium text-white transition-all duration-150"
-              >
-                {loading ? (
-                  <>
-                    <svg className="animate-spin" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" strokeDasharray="20 10" />
-                    </svg>
-                    Launching…
-                  </>
-                ) : (
-                  <>
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M7 1.5L9.5 6.5H12.5L10 9.5L11 13L7 11L3 13L4 9.5L1.5 6.5H4.5L7 1.5Z" fill="currentColor" />
-                    </svg>
-                    Launch
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-        </div>
-
-        <p className="text-center text-xs text-[#52525b] mt-6">
-          ProspectAI · AI-native outreach platform
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Shared components ────────────────────────────────────────────────────────
+// ─── Shared UI ─────────────────────────────────────────────────────────────────
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-baseline justify-between">
-        <label className="text-xs font-medium text-[#a1a1aa] uppercase tracking-wider">{label}</label>
-        {hint && <span className="text-[10px] text-[#52525b]">{hint}</span>}
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <label className="text-xs font-medium text-[#a1a1aa] uppercase tracking-wide">{label}</label>
+        {hint && <span className="text-xs text-[#52525b]">{hint}</span>}
       </div>
       {children}
     </div>
   );
 }
 
-const inputClass =
-  "w-full bg-[#18181b] border border-[#27272a] rounded-lg px-3.5 py-2.5 text-sm text-[#fafafa] placeholder-[#3f3f46] focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30 transition-all duration-150";
+// ─── Steps ─────────────────────────────────────────────────────────────────────
 
-// ─── Step 0: Business ─────────────────────────────────────────────────────────
-
-function StepBusiness({ data, update }: { data: any; update: (p: string, v: unknown) => void }) {
+function StepBusiness({ data, setData }: { data: OnboardingData; setData: (d: Partial<OnboardingData>) => void }) {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold text-[#fafafa]">Your Business</h2>
-        <p className="text-sm text-[#71717a] mt-1">Tell us about what you sell and who you help.</p>
+        <h2 className="text-xl font-semibold text-[#fafafa] mb-1">Your Business</h2>
+        <p className="text-sm text-[#71717a]">Tell us about what you sell and who you help.</p>
       </div>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Workspace Name">
-          <input
-            className={inputClass}
-            placeholder="My Agency"
-            value={data.name}
-            onChange={(e) => update("name", e.target.value)}
-          />
+        <Field label="Workspace Name *">
+          <input className="input" value={data.workspace_name} onChange={e => setData({ workspace_name: e.target.value })} placeholder="ProspectAI" />
         </Field>
-        <Field label="Your Email">
-          <input
-            className={inputClass}
-            type="email"
-            placeholder="you@company.com"
-            value={data.owner_email}
-            onChange={(e) => update("owner_email", e.target.value)}
-          />
+        <Field label="Your Email *">
+          <input className="input" type="email" value={data.owner_email} onChange={e => setData({ owner_email: e.target.value })} placeholder="you@company.com" />
         </Field>
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Company Name">
-          <input
-            className={inputClass}
-            placeholder="Acme Inc."
-            value={data.business_profile.company_name}
-            onChange={(e) => update("business_profile.company_name", e.target.value)}
-          />
-        </Field>
-        <Field label="Website">
-          <input
-            className={inputClass}
-            placeholder="https://acme.com"
-            value={data.business_profile.website}
-            onChange={(e) => update("business_profile.website", e.target.value)}
-          />
-        </Field>
-      </div>
-      <Field label="What you sell" hint="1–2 sentences">
-        <textarea
-          className={`${inputClass} h-20 resize-none`}
-          placeholder="We help SaaS companies book more demos through AI-personalized cold email..."
-          value={data.business_profile.product_description}
-          onChange={(e) => update("business_profile.product_description", e.target.value)}
-        />
+      <Field label="Company Name *">
+        <input className="input" value={data.company_name} onChange={e => setData({ company_name: e.target.value })} placeholder="Acme Inc." />
+      </Field>
+      <Field label="What You Sell *" hint="1–2 sentences">
+        <textarea className="input resize-none h-20" value={data.product_description}
+          onChange={e => setData({ product_description: e.target.value })}
+          placeholder="We help B2B companies book more meetings with AI-personalized cold emails." />
       </Field>
       <Field label="Value Prop" hint="We help X achieve Y by Z">
-        <input
-          className={inputClass}
-          placeholder="We help B2B founders get 10+ demos/month by writing emails that feel human"
-          value={data.business_profile.value_prop}
-          onChange={(e) => update("business_profile.value_prop", e.target.value)}
-        />
+        <input className="input" value={data.value_prop} onChange={e => setData({ value_prop: e.target.value })}
+          placeholder="We help agencies get 3x more clients without hiring more SDRs." />
       </Field>
-      <Field label="Proof / Case Study" hint="Your best result — used in every email. Be specific.">
-        <input
-          className={inputClass}
-          placeholder="We got 50 meetings for Figure8 (Belgian agency) in 90 days"
-          value={data.business_profile.case_study}
-          onChange={(e) => update("business_profile.case_study", e.target.value)}
-        />
-      </Field>
-      <Field label="Your email persona" hint="Optional — how you present yourself in emails">
-        <input
-          className={inputClass}
-          placeholder="You are a founder at Acme, reaching out peer-to-peer to other founders."
-          value={data.business_profile.role_description}
-          onChange={(e) => update("business_profile.role_description", e.target.value)}
-        />
+      <Field label="Proof / Case Study" hint="Your best result — used in every email">
+        <input className="input" value={data.case_study} onChange={e => setData({ case_study: e.target.value })}
+          placeholder="Got 50 meetings for a web design agency in Belgium in 90 days." />
       </Field>
     </div>
   );
 }
 
-// ─── Step 1: ICP ──────────────────────────────────────────────────────────────
-
-function StepICP({ data, update }: { data: any; update: (p: string, v: unknown) => void }) {
-  const toggleIndustry = (val: string) => {
-    const arr = data.icp_config.industries as string[];
-    update("icp_config.industries", arr.includes(val) ? arr.filter((v) => v !== val) : [...arr, val]);
-  };
-  const toggleSize = (val: string) => {
-    const arr = data.icp_config.company_sizes as string[];
-    update("icp_config.company_sizes", arr.includes(val) ? arr.filter((v) => v !== val) : [...arr, val]);
-  };
-
+function StepTarget({ data, setData }: { data: OnboardingData; setData: (d: Partial<OnboardingData>) => void }) {
+  const toggle = (arr: string[], val: string) => arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val];
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold text-[#fafafa]">Ideal Customer Profile</h2>
-        <p className="text-sm text-[#71717a] mt-1">Define who you want to reach.</p>
+        <h2 className="text-xl font-semibold text-[#fafafa] mb-1">Who You Target</h2>
+        <p className="text-sm text-[#71717a]">Define the companies and roles you want to reach.</p>
       </div>
-
-      <Field label="Industries">
+      <Field label="Industries *">
         <div className="flex flex-wrap gap-2 mt-1">
-          {INDUSTRIES.map(({ value, label }) => {
-            const active = data.icp_config.industries.includes(value);
-            return (
-              <button
-                key={value}
-                type="button"
-                onClick={() => toggleIndustry(value)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border ${
-                  active
-                    ? "bg-brand-500/15 border-brand-500/50 text-brand-400"
-                    : "bg-[#18181b] border-[#27272a] text-[#71717a] hover:border-[#3f3f46] hover:text-[#a1a1aa]"
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
+          {INDUSTRIES.map(i => (
+            <button key={i} type="button" onClick={() => setData({ industries: toggle(data.industries, i) })}
+              className={`px-3 py-1.5 rounded-lg text-sm border transition-all ${data.industries.includes(i) ? "bg-brand-500 border-brand-500 text-white" : "border-[#27272a] text-[#71717a] hover:border-[#52525b]"}`}>
+              {i}
+            </button>
+          ))}
         </div>
       </Field>
-
       <Field label="Company Size">
         <div className="flex flex-wrap gap-2 mt-1">
-          {SIZES.map((s) => {
-            const active = data.icp_config.company_sizes.includes(s);
-            return (
-              <button
-                key={s}
-                type="button"
-                onClick={() => toggleSize(s)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border ${
-                  active
-                    ? "bg-brand-500/15 border-brand-500/50 text-brand-400"
-                    : "bg-[#18181b] border-[#27272a] text-[#71717a] hover:border-[#3f3f46] hover:text-[#a1a1aa]"
-                }`}
-              >
-                {s}
-              </button>
-            );
-          })}
+          {SIZES.map(s => (
+            <button key={s} type="button" onClick={() => setData({ company_sizes: toggle(data.company_sizes, s) })}
+              className={`px-3 py-1.5 rounded-lg text-sm border transition-all ${data.company_sizes.includes(s) ? "bg-brand-500 border-brand-500 text-white" : "border-[#27272a] text-[#71717a] hover:border-[#52525b]"}`}>
+              {s}
+            </button>
+          ))}
         </div>
       </Field>
-
-      <Field label="Target Titles" hint="one per line">
-        <textarea
-          className={`${inputClass} h-20 resize-none`}
-          placeholder={"Head of Sales\nFounder\nCEO\nVP Sales"}
-          value={data.icp_config.titles.join("\n")}
-          onChange={(e) => update("icp_config.titles", e.target.value.split("\n"))}
-        />
+      <Field label="Target Titles" hint="One per line">
+        <textarea className="input resize-none h-28" value={data.titles}
+          onChange={e => setData({ titles: e.target.value })}
+          placeholder={"CEO\nFounder\nHead of Sales\nVP Marketing"} />
       </Field>
-
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Geographies" hint="comma-separated">
-          <input
-            className={inputClass}
-            placeholder="US, UK, DACH"
-            value={data.icp_config.geographies.join(", ")}
-            onChange={(e) =>
-              update(
-                "icp_config.geographies",
-                e.target.value.split(",").map((s) => s.trim())
-              )
-            }
-          />
-        </Field>
-        <Field label="Leads / Day">
-          <input
-            className={inputClass}
-            type="number"
-            min={10}
-            max={500}
-            value={data.daily_lead_target}
-            onChange={(e) => update("daily_lead_target", parseInt(e.target.value))}
-          />
-        </Field>
-      </div>
+      <Field label="Countries / Regions" hint="Comma-separated">
+        <input className="input" value={data.geographies} onChange={e => setData({ geographies: e.target.value })}
+          placeholder="US, UK, Germany, Netherlands" />
+      </Field>
     </div>
   );
 }
 
-// ─── Step 2: Tone ─────────────────────────────────────────────────────────────
+function StepInstantly({ data, setData }: { data: OnboardingData; setData: (d: Partial<OnboardingData>) => void }) {
+  const [campaigns, setCampaigns] = useState<InstantlyCampaign[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-const TONES = [
-  {
-    value: "direct",
-    label: "Direct",
-    desc: "Confident, peer-to-peer. Gets to the point fast.",
-    icon: "→",
-  },
-  {
-    value: "friendly",
-    label: "Friendly",
-    desc: "Warm and conversational. Builds rapport first.",
-    icon: "◉",
-  },
-  {
-    value: "professional",
-    label: "Professional",
-    desc: "Formal, structured. Works well in corporate environments.",
-    icon: "◈",
-  },
-] as const;
+  const loadCampaigns = async () => {
+    if (!data.instantly_api_key.trim()) return;
+    setLoading(true); setError("");
+    try {
+      const result = await api.listInstantlyCampaigns(data.instantly_api_key.trim());
+      setCampaigns(result);
+      if (result.length === 1) setData({ instantly_campaign_id: result[0].id, instantly_campaign_name: result[0].name });
+    } catch {
+      setError("Could not load campaigns. Check your API key.");
+    } finally { setLoading(false); }
+  };
 
-function StepTone({ data, update }: { data: any; update: (p: string, v: unknown) => void }) {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold text-[#fafafa]">Email Tone & Style</h2>
-        <p className="text-sm text-[#71717a] mt-1">How should your emails sound?</p>
+        <h2 className="text-xl font-semibold text-[#fafafa] mb-1">Connect Instantly</h2>
+        <p className="text-sm text-[#71717a]">Your emails are sent through your Instantly account. You can skip this and connect later in Settings.</p>
       </div>
-      <div className="space-y-2.5">
-        {TONES.map(({ value, label, desc, icon }) => {
-          const active = data.tone_config.style === value;
-          return (
-            <button
-              key={value}
-              type="button"
-              onClick={() => update("tone_config.style", value)}
-              className={`w-full text-left px-4 py-3.5 rounded-xl border transition-all duration-150 ${
-                active
-                  ? "border-brand-500/50 bg-brand-500/8"
-                  : "border-[#27272a] bg-[#18181b] hover:border-[#3f3f46]"
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <span className={`text-lg w-6 text-center ${active ? "text-brand-400" : "text-[#52525b]"}`}>
-                  {icon}
-                </span>
-                <div>
-                  <p className={`text-sm font-medium ${active ? "text-brand-400" : "text-[#a1a1aa]"}`}>
-                    {label}
-                  </p>
-                  <p className="text-xs text-[#71717a] mt-0.5">{desc}</p>
-                </div>
-                {active && (
-                  <div className="ml-auto w-4 h-4 rounded-full bg-brand-500 flex items-center justify-center flex-shrink-0">
-                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                      <path d="M1.5 4l2 2 3-3" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </div>
-                )}
+      <div className="bg-[#18181b] border border-[#27272a] rounded-lg p-3 flex gap-3 items-start">
+        <span className="text-yellow-500 mt-0.5">!</span>
+        <p className="text-xs text-[#a1a1aa]">Find your API key in Instantly → Settings → Integrations → API Keys. The campaign must already exist in Instantly.</p>
+      </div>
+      <Field label="Instantly API Key">
+        <div className="flex gap-2">
+          <input className="input flex-1" value={data.instantly_api_key}
+            onChange={e => { setData({ instantly_api_key: e.target.value, instantly_campaign_id: "", instantly_campaign_name: "" }); setCampaigns([]); }}
+            placeholder="inst_••••••••••••••••••••" />
+          <button type="button" onClick={loadCampaigns} disabled={!data.instantly_api_key.trim() || loading}
+            className="px-4 py-2 rounded-lg bg-brand-500 text-white text-sm font-medium disabled:opacity-40 hover:bg-brand-600 transition-colors whitespace-nowrap">
+            {loading ? "Loading…" : "Load Campaigns"}
+          </button>
+        </div>
+        {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
+      </Field>
+      {campaigns.length > 0 && (
+        <Field label="Select Campaign">
+          <select className="input" value={data.instantly_campaign_id}
+            onChange={e => { const c = campaigns.find(c => c.id === e.target.value); setData({ instantly_campaign_id: e.target.value, instantly_campaign_name: c?.name || "" }); }}>
+            <option value="">— Choose a campaign —</option>
+            {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+      )}
+      {data.instantly_campaign_id && (
+        <div className="flex items-center gap-2 text-sm text-green-400">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7l3.5 3.5L12 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          Campaign: <span className="font-medium">{data.instantly_campaign_name}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StepLeads({ csvFile, setCsvFile, csvPreview, setCsvPreview, mapping, setMapping }: {
+  csvFile: File | null; setCsvFile: (f: File | null) => void;
+  csvPreview: CsvPreview | null; setCsvPreview: (p: CsvPreview | null) => void;
+  mapping: Record<string, string>; setMapping: (m: Record<string, string>) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const parseFile = useCallback(async (file: File) => {
+    setCsvFile(file); setError(""); setLoading(true);
+    try {
+      const text = await file.text();
+      const lines = text.split("\n").filter(Boolean);
+      const rawHeaders = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
+      const rows = lines.slice(1, 6).map(line => {
+        const vals = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
+        return Object.fromEntries(rawHeaders.map((h, i) => [h, vals[i] || ""]));
+      });
+      const patterns: Record<string, string[]> = {
+        email: ["email", "e-mail", "emailaddress", "email address", "mail"],
+        first_name: ["first_name", "first name", "firstname", "vorname"],
+        last_name: ["last_name", "last name", "lastname", "nachname", "surname"],
+        company: ["company", "company name", "organization", "organisation", "firm", "account"],
+        title: ["title", "job title", "jobtitle", "position", "role"],
+        linkedin_url: ["linkedin", "linkedin url", "linkedin_url", "profile url"],
+        website: ["website", "url", "web", "domain"],
+        industry: ["industry", "sector", "vertical"],
+        company_size: ["company size", "employees", "headcount", "size", "company_size"],
+        location: ["location", "country", "city", "region"],
+      };
+      const autoMapping: Record<string, string> = {};
+      for (const [field, aliases] of Object.entries(patterns)) {
+        for (const header of rawHeaders) {
+          if (aliases.includes(header.toLowerCase().trim())) { autoMapping[field] = header; break; }
+        }
+      }
+      setCsvPreview({ headers: rawHeaders, preview: rows, auto_mapping: autoMapping, importable_fields: Object.keys(patterns) });
+      setMapping(autoMapping);
+    } catch { setError("Could not parse CSV. Make sure it's a valid CSV file."); }
+    finally { setLoading(false); }
+  }, [setCsvFile, setCsvPreview, setMapping]);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); setDragging(false);
+    const file = e.dataTransfer.files[0]; if (file) parseFile(file);
+  }, [parseFile]);
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-semibold text-[#fafafa] mb-1">Upload Your Leads</h2>
+        <p className="text-sm text-[#71717a]">Upload a CSV with the contacts you want to reach. Email column is required.</p>
+      </div>
+
+      {!csvPreview ? (
+        <div onDrop={onDrop} onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
+          onClick={() => document.getElementById("csv-onboarding")?.click()}
+          className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${dragging ? "border-brand-500 bg-brand-500/5" : "border-[#27272a] hover:border-[#52525b]"}`}>
+          <input id="csv-onboarding" type="file" accept=".csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) parseFile(f); }} />
+          {loading ? <p className="text-sm text-[#71717a]">Parsing…</p> : (
+            <>
+              <div className="w-10 h-10 rounded-xl bg-[#27272a] flex items-center justify-center mx-auto mb-3">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 3v10M6 9l4-4 4 4" stroke="#71717a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3 15h14" stroke="#71717a" strokeWidth="1.5" strokeLinecap="round"/></svg>
               </div>
-            </button>
-          );
-        })}
+              <p className="text-sm font-medium text-[#a1a1aa]">Drop CSV here or click to browse</p>
+              <p className="text-xs text-[#52525b] mt-1">Email column required. First name, company, title recommended.</p>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm text-green-400">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7l3.5 3.5L12 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              {csvFile?.name}
+            </div>
+            <button type="button" onClick={() => { setCsvFile(null); setCsvPreview(null); setMapping({}); }} className="text-xs text-[#52525b] hover:text-[#a1a1aa]">Change file</button>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {csvPreview.importable_fields.map(field => (
+              <div key={field}>
+                <label className="text-xs text-[#71717a] block mb-1">{FIELD_LABELS[field] || field}</label>
+                <select className="input text-sm" value={mapping[field] || ""} onChange={e => setMapping({ ...mapping, [field]: e.target.value })}>
+                  <option value="">— not mapped —</option>
+                  {csvPreview.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          {!mapping.email && <p className="text-amber-400 text-xs">Map the Email column to continue.</p>}
+        </div>
+      )}
+      {error && <p className="text-red-400 text-sm">{error}</p>}
+    </div>
+  );
+}
+
+function StepLaunch({ data, csvPreview }: { data: OnboardingData; csvPreview: CsvPreview | null }) {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-semibold text-[#fafafa] mb-1">Ready to Launch</h2>
+        <p className="text-sm text-[#71717a]">Review your setup before going live.</p>
+      </div>
+      <div className="bg-[#18181b] border border-[#27272a] rounded-xl divide-y divide-[#27272a]">
+        {[
+          ["Workspace", data.workspace_name],
+          ["Company", data.company_name],
+          ["Targeting", data.industries.slice(0, 3).join(", ") || "—"],
+          ["Company sizes", data.company_sizes.join(", ") || "Any"],
+          ["Leads", csvPreview ? `CSV ready (${csvPreview.preview.length}+ rows parsed)` : "Add later via Leads page"],
+          ["Instantly", data.instantly_campaign_id ? `✓ ${data.instantly_campaign_name}` : "Not connected — add in Settings"],
+        ].map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between px-4 py-3">
+            <span className="text-sm text-[#71717a]">{label}</span>
+            <span className={`text-sm font-medium ${value.startsWith("✓") ? "text-green-400" : "text-[#fafafa]"}`}>{value}</span>
+          </div>
+        ))}
       </div>
       <p className="text-xs text-[#52525b]">
-        The system will load the best-performing seed templates for your industry. Refine tone after launch.
+        After launch, leads will be researched, scored, and personalized by AI — then added to your Instantly campaign. The optimizer will improve prompts over time based on performance.
       </p>
     </div>
   );
 }
 
-// ─── Step 3: Sending ──────────────────────────────────────────────────────────
+// ─── Main ──────────────────────────────────────────────────────────────────────
 
-function StepSending({ data, update }: { data: any; update: (p: string, v: unknown) => void }) {
+const STEPS = ["Business", "Target", "Instantly", "Leads", "Launch"];
+
+export default function OnboardingPage() {
+  const router = useRouter();
+  const [step, setStep] = useState(0);
+  const [launching, setLaunching] = useState(false);
+  const [error, setError] = useState("");
+
+  const [data, setDataRaw] = useState<OnboardingData>({
+    workspace_name: "", owner_email: "", company_name: "",
+    product_description: "", value_prop: "", case_study: "",
+    industries: [], company_sizes: [], titles: "", geographies: "",
+    instantly_api_key: "", instantly_campaign_id: "", instantly_campaign_name: "",
+  });
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvPreview, setCsvPreview] = useState<CsvPreview | null>(null);
+  const [mapping, setMapping] = useState<Record<string, string>>({});
+
+  const setData = (partial: Partial<OnboardingData>) => setDataRaw(prev => ({ ...prev, ...partial }));
+
+  const canAdvance = () => {
+    if (step === 0) return !!(data.workspace_name.trim() && data.owner_email.trim() && data.company_name.trim() && data.product_description.trim());
+    if (step === 1) return data.industries.length > 0;
+    if (step === 3 && csvPreview) return !!mapping.email;
+    return true;
+  };
+
+  const handleLaunch = async () => {
+    setLaunching(true); setError("");
+    try {
+      const workspace = await api.createWorkspace({
+        name: data.workspace_name,
+        owner_email: data.owner_email,
+        business_profile: {
+          company_name: data.company_name,
+          product_description: data.product_description,
+          value_prop: data.value_prop,
+          case_study: data.case_study,
+        },
+        icp_config: {
+          industries: data.industries,
+          company_sizes: data.company_sizes.map(s => SIZE_MAP[s] || s),
+          titles: data.titles.split("\n").map(t => t.trim()).filter(Boolean),
+          geographies: data.geographies.split(",").map(g => g.trim()).filter(Boolean),
+        },
+        instantly_api_key: data.instantly_api_key || undefined,
+        instantly_campaign_id: data.instantly_campaign_id || undefined,
+      } as any);
+
+      if (csvFile && mapping.email) {
+        await api.importCsv(workspace.id, csvFile, mapping).catch(() => {});
+      }
+
+      router.push("/dashboard");
+    } catch (e: any) {
+      setError(e.message || "Something went wrong. Please try again.");
+      setLaunching(false);
+    }
+  };
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold text-[#fafafa]">Connect Instantly</h2>
-        <p className="text-sm text-[#71717a] mt-1">Your emails are sent through your Instantly account.</p>
-      </div>
-      <div className="bg-[#18181b] border border-[#27272a] rounded-xl p-4 flex items-start gap-3">
-        <div className="w-8 h-8 rounded-lg bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M7 1.5v7M7 11v1.5" stroke="#eab308" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
+    <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-start py-12 px-4">
+      {/* Logo */}
+      <div className="flex items-center gap-2.5 mb-10">
+        <div className="w-8 h-8 rounded-xl bg-brand-500 flex items-center justify-center">
+          <svg width="16" height="16" viewBox="0 0 14 14" fill="none"><path d="M2 11L7 3l5 8H2z" fill="white" opacity="0.9"/></svg>
         </div>
-        <div>
-          <p className="text-xs font-medium text-[#a1a1aa]">Where to find your credentials</p>
-          <p className="text-xs text-[#71717a] mt-0.5">
-            Instantly → Settings → Integrations → API Keys. The campaign must already exist in Instantly.
-          </p>
-        </div>
-      </div>
-      <Field label="Instantly API Key">
-        <input
-          className={inputClass}
-          type="password"
-          placeholder="inst_••••••••••••••••••••"
-          value={data.instantly_api_key}
-          onChange={(e) => update("instantly_api_key", e.target.value)}
-        />
-      </Field>
-      <Field label="Campaign ID">
-        <input
-          className={inputClass}
-          placeholder="campaign_••••••••••••"
-          value={data.instantly_campaign_id}
-          onChange={(e) => update("instantly_campaign_id", e.target.value)}
-        />
-      </Field>
-    </div>
-  );
-}
-
-// ─── Step 4: Launch ───────────────────────────────────────────────────────────
-
-function StepLaunch({ data }: { data: any }) {
-  const industries = data.icp_config.industries.join(", ") || "Any industry";
-  const sizes = data.icp_config.company_sizes.join(", ") || "Any size";
-  const connected = !!data.instantly_api_key;
-
-  const rows = [
-    { label: "Workspace", value: data.name || "—" },
-    { label: "Targeting", value: `${industries}` },
-    { label: "Company sizes", value: `${sizes}` },
-    { label: "Daily target", value: `${data.daily_lead_target} leads / day` },
-    { label: "Email style", value: data.tone_config.style },
-    {
-      label: "Sending via",
-      value: connected ? "Instantly (connected)" : "No API key — will be inactive",
-      status: connected ? "ok" : "warn",
-    },
-  ];
-
-  return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold text-[#fafafa]">Ready to launch</h2>
-        <p className="text-sm text-[#71717a] mt-1">Review your setup before going live.</p>
+        <span className="font-semibold text-[#fafafa] text-base">ProspectAI</span>
       </div>
 
-      <div className="bg-[#18181b] border border-[#27272a] rounded-xl overflow-hidden">
-        {rows.map((row, i) => (
-          <div
-            key={row.label}
-            className={`flex justify-between items-center px-4 py-3 text-sm ${
-              i < rows.length - 1 ? "border-b border-[#27272a]" : ""
-            }`}
-          >
-            <span className="text-[#71717a]">{row.label}</span>
-            <span
-              className={`font-medium ${
-                row.status === "warn"
-                  ? "text-yellow-500"
-                  : row.status === "ok"
-                  ? "text-emerald-400"
-                  : "text-[#fafafa]"
-              }`}
-            >
-              {row.value}
-            </span>
+      {/* Steps */}
+      <div className="flex items-center mb-8">
+        {STEPS.map((label, i) => (
+          <div key={label} className="flex items-center">
+            <div className="flex flex-col items-center gap-1">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold transition-all ${i < step ? "bg-brand-500 text-white" : i === step ? "bg-brand-500 text-white ring-4 ring-brand-500/20" : "bg-[#27272a] text-[#52525b]"}`}>
+                {i < step ? <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l2.5 2.5L10 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> : i + 1}
+              </div>
+              <span className={`text-xs ${i === step ? "text-[#fafafa]" : "text-[#52525b]"}`}>{label}</span>
+            </div>
+            {i < STEPS.length - 1 && <div className={`w-14 h-px mx-2 mb-4 ${i < step ? "bg-brand-500" : "bg-[#27272a]"}`} />}
           </div>
         ))}
       </div>
 
-      <div className="bg-brand-500/8 border border-brand-500/20 rounded-xl p-4">
-        <p className="text-xs text-[#a1a1aa] leading-relaxed">
-          The system will source, research, score, and personalize leads automatically. The nightly
-          optimizer will improve prompts based on performance data. Monitor everything from the dashboard.
-        </p>
+      {/* Card */}
+      <div className="w-full max-w-lg bg-[#111113] border border-[#27272a] rounded-2xl p-8">
+        {step === 0 && <StepBusiness data={data} setData={setData} />}
+        {step === 1 && <StepTarget data={data} setData={setData} />}
+        {step === 2 && <StepInstantly data={data} setData={setData} />}
+        {step === 3 && <StepLeads csvFile={csvFile} setCsvFile={setCsvFile} csvPreview={csvPreview} setCsvPreview={setCsvPreview} mapping={mapping} setMapping={setMapping} />}
+        {step === 4 && <StepLaunch data={data} csvPreview={csvPreview} />}
+
+        {error && <p className="text-red-400 text-sm mt-4">{error}</p>}
+
+        <div className={`flex mt-8 ${step > 0 ? "justify-between" : "justify-end"}`}>
+          {step > 0 && (
+            <button type="button" onClick={() => setStep(s => s - 1)}
+              className="flex items-center gap-1.5 text-sm text-[#71717a] hover:text-[#a1a1aa] transition-colors">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Back
+            </button>
+          )}
+          <div className="flex gap-3">
+            {step === 2 && !data.instantly_api_key && (
+              <button type="button" onClick={() => setStep(3)} className="px-5 py-2.5 rounded-xl text-sm text-[#71717a] hover:text-[#a1a1aa] transition-colors">
+                Skip for now
+              </button>
+            )}
+            {step === 3 && !csvPreview && (
+              <button type="button" onClick={() => setStep(4)} className="px-5 py-2.5 rounded-xl text-sm text-[#71717a] hover:text-[#a1a1aa] transition-colors">
+                Skip for now
+              </button>
+            )}
+            {step < 4 ? (
+              <button type="button" onClick={() => setStep(s => s + 1)} disabled={!canAdvance()}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-brand-500 text-white text-sm font-medium disabled:opacity-40 hover:bg-brand-600 transition-colors">
+                Continue
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            ) : (
+              <button type="button" onClick={handleLaunch} disabled={launching}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-green-600 text-white text-sm font-medium disabled:opacity-60 hover:bg-green-700 transition-colors">
+                {launching ? "Launching…" : <><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1l1.5 3 3.5.5-2.5 2.5.5 3.5L7 9l-3 1.5.5-3.5L2 4.5l3.5-.5L7 1z" stroke="white" strokeWidth="1.2" strokeLinejoin="round"/></svg> Launch</>}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
+      <p className="mt-8 text-xs text-[#3f3f46]">ProspectAI · AI-native outreach platform</p>
     </div>
   );
 }
